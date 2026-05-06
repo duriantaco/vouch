@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="auth.password_reset" tests="2" failures="0" errors="0" skipped="0">
+  <testcase classname="auth.password_reset.required_test.token_expires" name="token expires" />
+  <testcase classname="auth.password_reset.required_test.unknown_email_receives_same_response_shape" name="unknown email receives same response shape" />
+</testsuite>

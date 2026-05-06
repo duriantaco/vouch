@@ -1,0 +1,28 @@
+/tmp
+.DS_Store
+
+# Local scratch output
+/tmp/
+
+# Vouch output when dogfooding this repo itself
+/.vouch/build/
+/.vouch/artifacts/
+/.vouch/manifests/
+
+# Go build/test output
+/bin/
+/dist/
+*.test
+coverage.out
+*.out
+
+# Python/test caches from fixture or smoke runs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local env files
+.env
+.env.*

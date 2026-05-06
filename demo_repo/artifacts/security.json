@@ -1,0 +1,10 @@
+{
+  "status": "pass",
+  "scanner": "demo-security",
+  "obligations": [
+    "auth.password_reset.security.no_account_enumeration",
+    "auth.password_reset.security.reset_token_is_stored_hashed",
+    "auth.password_reset.security.reset_endpoint_is_rate_limited_by_ip_and_account",
+    "auth.password_reset.security.reset_token_is_never_logged"
+  ]
+}

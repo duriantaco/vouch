@@ -1,0 +1,9 @@
+{
+  "status": "pass",
+  "obligations": [
+    "auth.password_reset.behavior.user_can_request_password_reset_by_email",
+    "auth.password_reset.behavior.response_does_not_reveal_whether_account_exists",
+    "auth.password_reset.behavior.reset_token_expires_after_30_minutes",
+    "auth.password_reset.behavior.reset_token_is_single_use"
+  ]
+}

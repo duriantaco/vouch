@@ -1,0 +1,383 @@
+package vouch
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestInitRepoDetectsPythonProfileAndWritesLayout(t *testing.T) {
+	repo := t.TempDir()
+	writeText(t, filepath.Join(repo, "pyproject.toml"), `[tool.fyn.tasks]
+lint = { cmd = "ruff check src/ tests/" }
+typecheck = { cmd = "mypy src/" }
+test = { cmd = "pytest" }
+`)
+	mustMkdir(t, filepath.Join(repo, "tests"))
+
+	result, err := InitRepo(repo, "auto", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Created {
+		t.Fatal("expected config to be created")
+	}
+	if !contains(result.Profiles, "python") {
+		t.Fatalf("expected python profile, got %#v", result.Profiles)
+	}
+	for _, rel := range []string{".vouch/intents", ".vouch/specs", ".vouch/manifests", ".vouch/artifacts", ".vouch/build"} {
+		if !dirExists(filepath.Join(repo, rel)) {
+			t.Fatalf("expected directory %s", rel)
+		}
+	}
+	config := mustLoadConfig(t, filepath.Join(repo, ".vouch", "config.json"))
+	if config.Version != ConfigSchemaVersion {
+		t.Fatalf("unexpected config version %s", config.Version)
+	}
+	if !contains(config.Commands, "fyn run pytest --junitxml .vouch/artifacts/junit.xml") {
+		t.Fatalf("expected pytest command, got %#v", config.Commands)
+	}
+
+	second, err := InitRepo(repo, "auto", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created {
+		t.Fatal("expected second init to be idempotent")
+	}
+}
+
+func TestContractSuggestSupportsFlatPythonPackageLayout(t *testing.T) {
+	repo := t.TempDir()
+	writeText(t, filepath.Join(repo, "pyproject.toml"), `[project]
+name = "sundae"
+`)
+	writeText(t, filepath.Join(repo, "sundae", "__init__.py"), "")
+	writeText(t, filepath.Join(repo, "sundae", "collector.py"), "")
+	writeText(t, filepath.Join(repo, "sundae", "dashboard", "server.py"), "")
+	writeText(t, filepath.Join(repo, "tests", "test_dashboard.py"), "")
+
+	suggestions, err := ContractSuggestions(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSuggestion(suggestions, "sundae.core", "sundae/*.py") {
+		t.Fatalf("expected flat package core suggestion, got %#v", suggestions)
+	}
+	if !hasSuggestion(suggestions, "sundae.dashboard", "sundae/dashboard/**") {
+		t.Fatalf("expected flat package submodule suggestion, got %#v", suggestions)
+	}
+}
+
+func TestContractCreateAndManifestCreateMapChangedFilesToOwnedSpec(t *testing.T) {
+	repo := initializedRepo(t)
+	spec := createSampleContract(t, repo, RiskHigh)
+
+	manifest, err := CreateManifest(repo, ManifestCreateOptions{
+		TaskID:       "agent-1",
+		Summary:      "change app service",
+		Agent:        "codex",
+		RunID:        "run-1",
+		ChangedFiles: []string{"src/app/service.py", "tests/test_app.py"},
+		Out:          ".vouch/manifests/agent-1.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Change.Risk != RiskHigh {
+		t.Fatalf("expected risk to inherit high from spec, got %s", manifest.Change.Risk)
+	}
+	if got := strings.Join(manifest.Change.SpecsTouched, ","); got != spec.ID {
+		t.Fatalf("expected touched spec %s, got %s", spec.ID, got)
+	}
+	if !manifest.Runtime.Canary.Enabled || manifest.Runtime.Canary.InitialPercent != 5 {
+		t.Fatalf("expected high-risk manifest to enable canary: %#v", manifest.Runtime.Canary)
+	}
+	loaded := mustLoadManifest(t, filepath.Join(repo, ".vouch", "manifests", "agent-1.json"))
+	if loaded.Task.ID != "agent-1" {
+		t.Fatalf("manifest was not written: %#v", loaded.Task)
+	}
+	errors := CompileManifestPipeline(mustLoadSpecs(t, repo), loaded).ManifestErrors
+	if len(errors) != 0 {
+		t.Fatalf("expected manifest check to pass, got %#v", errors)
+	}
+}
+
+func TestManifestCreateRejectsRiskDowngrade(t *testing.T) {
+	repo := initializedRepo(t)
+	createSampleContract(t, repo, RiskHigh)
+
+	_, err := CreateManifest(repo, ManifestCreateOptions{
+		TaskID:       "agent-1",
+		Summary:      "change app service",
+		Agent:        "codex",
+		RunID:        "run-1",
+		Risk:         RiskLow,
+		ChangedFiles: []string{"src/app/service.py"},
+		Out:          ".vouch/manifests/agent-1.json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot be lower") {
+		t.Fatalf("expected risk downgrade error, got %v", err)
+	}
+}
+
+func TestManifestCreateAllowsUnownedFilesForCompilerTraceabilityBlock(t *testing.T) {
+	repo := initializedRepo(t)
+	createSampleContract(t, repo, RiskMedium)
+
+	manifest, err := CreateManifest(repo, ManifestCreateOptions{
+		TaskID:       "agent-1",
+		Summary:      "change unowned file",
+		Agent:        "codex",
+		RunID:        "run-1",
+		ChangedFiles: []string{"docs/README.md"},
+		Out:          ".vouch/manifests/agent-1.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Change.SpecsTouched) != 0 {
+		t.Fatalf("expected no matched specs, got %#v", manifest.Change.SpecsTouched)
+	}
+	errors := CompileManifestPipeline(mustLoadSpecs(t, repo), manifest).ManifestErrors
+	if !containsOnboardingSubstring(errors, "is not owned by any spec") {
+		t.Fatalf("expected unowned file manifest error, got %#v", errors)
+	}
+}
+
+func TestAttachArtifactInfersCoveredObligations(t *testing.T) {
+	repo := initializedRepo(t)
+	spec := createSampleContract(t, repo, RiskMedium)
+	manifest, err := CreateManifest(repo, ManifestCreateOptions{
+		TaskID:       "agent-1",
+		Summary:      "change app service",
+		Agent:        "codex",
+		RunID:        "run-1",
+		ChangedFiles: []string{"src/app/service.py"},
+		Out:          ".vouch/manifests/agent-1.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	behaviorID := obligationID(t, spec, ObligationBehavior, "service returns stable JSON")
+	writeText(t, filepath.Join(repo, ".vouch", "artifacts", "behavior.json"), `{"status":"pass","obligations":["`+behaviorID+`"]}`)
+
+	updated, artifact, err := AttachArtifact(repo, AttachArtifactOptions{
+		ManifestPath: ".vouch/manifests/agent-1.json",
+		ID:           "behavior",
+		Kind:         EvidenceBehaviorTrace,
+		Path:         ".vouch/artifacts/behavior.json",
+		Command:      "contract probe",
+		ExitCode:     0,
+		Out:          ".vouch/manifests/agent-1.with-artifact.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Producer != manifest.Agent.Name {
+		t.Fatalf("expected producer to default to agent, got %q", artifact.Producer)
+	}
+	if !contains(artifact.Obligations, behaviorID) {
+		t.Fatalf("expected inferred obligation %s, got %#v", behaviorID, artifact.Obligations)
+	}
+	if len(updated.Verification.Artifacts) != 1 {
+		t.Fatalf("expected one artifact, got %#v", updated.Verification.Artifacts)
+	}
+}
+
+func TestAttachArtifactRejectsNonZeroExitAndPathEscape(t *testing.T) {
+	repo := initializedRepo(t)
+	createSampleContract(t, repo, RiskMedium)
+	_, err := CreateManifest(repo, ManifestCreateOptions{
+		TaskID:       "agent-1",
+		Summary:      "change app service",
+		Agent:        "codex",
+		RunID:        "run-1",
+		ChangedFiles: []string{"src/app/service.py"},
+		Out:          ".vouch/manifests/agent-1.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeText(t, filepath.Join(repo, ".vouch", "artifacts", "behavior.json"), `{"status":"pass"}`)
+	_, _, err = AttachArtifact(repo, AttachArtifactOptions{
+		ManifestPath: ".vouch/manifests/agent-1.json",
+		ID:           "behavior",
+		Kind:         EvidenceBehaviorTrace,
+		Path:         ".vouch/artifacts/behavior.json",
+		ExitCode:     1,
+		Out:          ".vouch/manifests/agent-1.json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "exit code") {
+		t.Fatalf("expected exit code error, got %v", err)
+	}
+	_, _, err = AttachArtifact(repo, AttachArtifactOptions{
+		ManifestPath: ".vouch/manifests/agent-1.json",
+		ID:           "behavior",
+		Kind:         EvidenceBehaviorTrace,
+		Path:         "../outside.json",
+		ExitCode:     0,
+		Out:          ".vouch/manifests/agent-1.json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "escapes repo") {
+		t.Fatalf("expected path escape error, got %v", err)
+	}
+}
+
+func TestCLIInitContractManifestAndAttachArtifact(t *testing.T) {
+	repo := t.TempDir()
+	writeText(t, filepath.Join(repo, "pyproject.toml"), `[tool.pytest.ini_options]
+testpaths = ["tests"]
+`)
+	mustMkdir(t, filepath.Join(repo, "src", "app"))
+	var stdout, stderr bytes.Buffer
+	code := Main([]string{"--repo", repo, "init", "--profile", "python"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("init failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{
+		"--repo", repo,
+		"contract", "create",
+		"--name", "app.service",
+		"--owner", "platform",
+		"--risk", "medium",
+		"--paths", "src/app/**",
+		"--behavior", "service returns stable JSON",
+		"--required-test", "service json contract is stable",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("contract create failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{
+		"--repo", repo,
+		"manifest", "create",
+		"--task-id", "agent-1",
+		"--summary", "change app service",
+		"--agent", "codex",
+		"--run-id", "run-1",
+		"--changed-file", "src/app/service.py",
+		"--out", ".vouch/manifests/run.json",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("manifest create failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	spec := mustLoadSpecs(t, repo)["app.service"]
+	behaviorID := obligationID(t, spec, ObligationBehavior, "service returns stable JSON")
+	writeText(t, filepath.Join(repo, ".vouch", "artifacts", "behavior.json"), `{"status":"pass","obligations":["`+behaviorID+`"]}`)
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{
+		"--repo", repo,
+		"manifest", "attach-artifact",
+		"--manifest", ".vouch/manifests/run.json",
+		"--id", "behavior",
+		"--kind", string(EvidenceBehaviorTrace),
+		"--path", ".vouch/artifacts/behavior.json",
+		"--exit-code", "0",
+		"--out", ".vouch/manifests/run.with-artifact.json",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("attach-artifact failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	manifest := mustLoadManifest(t, filepath.Join(repo, ".vouch", "manifests", "run.with-artifact.json"))
+	if len(manifest.Verification.Artifacts) != 1 {
+		t.Fatalf("expected one attached artifact, got %#v", manifest.Verification.Artifacts)
+	}
+}
+
+func initializedRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	writeText(t, filepath.Join(repo, "pyproject.toml"), `[tool.pytest.ini_options]
+testpaths = ["tests"]
+`)
+	mustMkdir(t, filepath.Join(repo, "src", "app"))
+	mustMkdir(t, filepath.Join(repo, "tests"))
+	if _, err := InitRepo(repo, "auto", false); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+func createSampleContract(t *testing.T, repo string, risk Risk) Spec {
+	t.Helper()
+	spec, _, _, err := CreateContract(repo, Intent{
+		Feature:       "app.service",
+		Owner:         "platform",
+		OwnedPaths:    []string{"src/app/**", "tests/test_app.py"},
+		Risk:          risk,
+		Behavior:      []string{"service returns stable JSON"},
+		Security:      []string{"project paths stay inside repo"},
+		RequiredTests: []string{"service json contract is stable"},
+		RuntimeMetrics: []string{
+			"app.service.requests",
+		},
+		Rollback: SpecRollback{Strategy: "revert_change"},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec
+}
+
+func writeText(t *testing.T, path string, value string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustLoadConfig(t *testing.T, path string) Config {
+	t.Helper()
+	config, err := LoadJSON[Config](path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return config
+}
+
+func mustLoadSpecs(t *testing.T, repo string) map[string]Spec {
+	t.Helper()
+	specs, err := LoadSpecs(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return specs
+}
+
+func containsOnboardingSubstring(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSuggestion(suggestions []ContractSuggestion, name string, ownedPath string) bool {
+	for _, suggestion := range suggestions {
+		if suggestion.Name == name && contains(suggestion.OwnedPaths, ownedPath) {
+			return true
+		}
+	}
+	return false
+}
