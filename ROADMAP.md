@@ -33,6 +33,11 @@ CI can execute Vouch, but the product is the compiler-like control plane:
 
 If a feature only makes Vouch a nicer wrapper around existing test commands, it should not be a roadmap priority unless it also strengthens obligation coverage, evidence quality, policy semantics, or auditability.
 
+Vouch should also be explicit about how it composes with existing supply-chain
+and policy tools. Sigstore/cosign, SLSA, in-toto, OPA, and Conftest cover
+important parts of the system; Vouch's distinct surface is the contract language,
+obligation IR, evidence mapping, and release result built on top.
+
 ## Current Beta
 
 Implemented today:
@@ -46,6 +51,7 @@ Implemented today:
 - Verifier/test/release artifact generation.
 - Evidence artifact reference resolution from change manifests.
 - Artifact path/hash verification.
+- Optional cosign bundle verification for evidence artifacts under `gate --require-signed`.
 - JUnit XML importer for test evidence.
 - Deterministic verifier findings.
 - Touched-spec compilation for faster PR checks.
@@ -54,6 +60,7 @@ Implemented today:
 - Manifest creation from changed files and owned paths.
 - Artifact attachment with obligation inference.
 - JUnit test-map adapter for raw pytest-style JUnit evidence.
+- Machine-readable gate result artifact output for status checks.
 - Release decisions: `block`, `human_escalation`, `canary`, `auto_merge`.
 - Demo repo with blocked and passing manifests.
 - Unit tests for the current pipeline.
@@ -71,6 +78,21 @@ Recent validation runs used temp copies of real repos, so Vouch exercised the ge
 These runs show the current beta can initialize unfamiliar repos, create contracts, create manifests from changed files, map raw test output to required-test obligations, attach evidence, and produce deterministic release decisions.
 
 It does not yet prove that Vouch understands arbitrary product intent. The contract remains the source of truth, and the next product work should reduce the manual work needed to create and maintain those contracts.
+
+## Execution Order
+
+The trust and policy work should move earlier than the original phase order.
+Until evidence is provenance-bound and policy is inspectable, workflow polish and
+AI verifier layers are easy to bypass or hard to reason about.
+
+Near-term execution order:
+
+1. Tamper-evident evidence and runner identity.
+2. Policy files and policy simulation.
+3. Positioning and comparison artifacts.
+4. Contract-generation paths that reduce authoring cost.
+5. Reproducible case studies that show Vouch catching realistic regressions.
+6. AI evidence verifiers only after signed evidence and policy semantics exist.
 
 ## Roadmap Phases
 
@@ -94,7 +116,10 @@ Separate release policy from hard-coded Go logic.
 
 Planned work:
 
-- Policy-as-code files.
+- Policy-as-code files loaded from `.vouch/policy/`.
+- Rego policy adapter or a deliberately smaller custom evaluator.
+- Compact policy input containing spec, manifest, IR coverage, findings, invalid evidence, and provenance status.
+- Policy output containing decision and reasons.
 - Risk-specific policy profiles.
 - Team-specific override rules.
 - Exception handling with audit trails.
@@ -108,7 +133,6 @@ Make Vouch useful in real pull-request workflows while keeping CI as the runner,
 Planned work:
 
 - GitHub Checks integration.
-- Machine-readable gate result artifact.
 - SARIF or annotation output for diagnostics.
 - Artifact upload conventions.
 - Required status check examples.
@@ -118,9 +142,14 @@ Planned work:
 
 Turn generated verifier packets into first-class verifier inputs.
 
+This phase should wait until evidence provenance and policy semantics are in
+place. A verifier finding is useful only when the verifier output is tied to a
+runner identity and the release policy says how to use it.
+
 Planned work:
 
 - Verifier input packet schema.
+- Signed verifier output schema.
 - Structured verifier output schema.
 - Prompt and model version pinning.
 - Verifier confidence and disagreement handling.
@@ -144,7 +173,9 @@ Implemented base:
 Planned work:
 
 - Spec-to-file traceability beyond owned path globs.
+- OpenAPI-to-contract stub generation.
 - Test discovery and suggested test-map generation.
+- Typed API/signature obligation suggestions.
 - Coverage report import.
 - Static analysis import.
 - SARIF import.
@@ -172,6 +203,10 @@ Make the system usable by teams.
 
 Planned work:
 
+- Runner identity in manifests and evidence artifacts.
+- Allowed signer policy for contracts or repo policy.
+- Detached signatures over canonical evidence bundles.
+- Hardened `gate --require-signed` mode that binds manifest, artifact hashes, and obligation IDs.
 - Signed specs and manifests.
 - Agent identity and run provenance.
 - Tamper-evident evidence bundles.
@@ -184,15 +219,19 @@ Planned work:
 
 The next useful contributions are:
 
+- Signed or hashed evidence bundle format.
+- Runner identity and allowed signer fields.
+- Hardened `gate --require-signed` production mode.
+- Policy-as-code design and simulation command.
+- Rego policy adapter decision spike.
 - Reference workflow for `init -> manifest -> pytest -> junit map -> attach -> gate`.
-- Machine-readable gate result file for required status checks.
+- Real-world case study showing a plausible bad agent change blocked by an obligation.
 - Test-map discovery to reduce manual required-test mapping.
+- OpenAPI-to-contract stub generation.
 - Coverage XML importer for required-test and behavior evidence.
 - Static-analysis/SARIF importer for security and quality evidence.
 - JSON schemas plus compatibility tests for AST, spec, IR, plan, manifest, and evidence.
 - Golden diagnostics for parser and compiler failures.
-- Policy-as-code design and simulation command.
-- Signed or hashed evidence bundle format.
 - More demo scenarios beyond password reset, including ordinary library changes.
 
 ## Productionization Track

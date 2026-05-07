@@ -360,16 +360,19 @@ func CreateManifest(repo string, opts ManifestCreateOptions) (Manifest, error) {
 }
 
 type AttachArtifactOptions struct {
-	ManifestPath string
-	ID           string
-	Kind         EvidenceKind
-	Path         string
-	TestMapPath  string
-	Producer     string
-	Command      string
-	ExitCode     int
-	SHA256       string
-	Out          string
+	ManifestPath     string
+	ID               string
+	Kind             EvidenceKind
+	Path             string
+	TestMapPath      string
+	Producer         string
+	Command          string
+	ExitCode         int
+	SHA256           string
+	SignatureBundle  string
+	SignerIdentity   string
+	SignerOIDCIssuer string
+	Out              string
 }
 
 func AttachArtifact(repo string, opts AttachArtifactOptions) (Manifest, EvidenceArtifact, error) {
@@ -386,6 +389,9 @@ func AttachArtifact(repo string, opts AttachArtifactOptions) (Manifest, Evidence
 	if opts.ExitCode != 0 {
 		return Manifest{}, EvidenceArtifact{}, fmt.Errorf("artifact exit code must be 0, got %d", opts.ExitCode)
 	}
+	if err := validateSignatureMetadata(opts.SignatureBundle, opts.SignerIdentity, opts.SignerOIDCIssuer); err != nil {
+		return Manifest{}, EvidenceArtifact{}, err
+	}
 	artifactPath := opts.Path
 	if opts.TestMapPath != "" {
 		if opts.Kind != EvidenceTestCoverage {
@@ -393,6 +399,9 @@ func AttachArtifact(repo string, opts AttachArtifactOptions) (Manifest, Evidence
 		}
 		if opts.SHA256 != "" {
 			return Manifest{}, EvidenceArtifact{}, errors.New("--sha256 cannot be combined with --test-map because the mapped JUnit artifact is generated")
+		}
+		if opts.SignatureBundle != "" || opts.SignerIdentity != "" || opts.SignerOIDCIssuer != "" {
+			return Manifest{}, EvidenceArtifact{}, errors.New("signature metadata cannot be combined with --test-map because the mapped JUnit artifact is generated")
 		}
 		mappedPath := defaultMappedJUnitArtifactPath(opts.ID)
 		if _, err := MapJUnitEvidence(absRepo, JUnitMapOptions{
@@ -444,14 +453,17 @@ func AttachArtifact(repo string, opts AttachArtifactOptions) (Manifest, Evidence
 		producer = "local"
 	}
 	artifact := EvidenceArtifact{
-		ID:          opts.ID,
-		Kind:        opts.Kind,
-		Producer:    producer,
-		Command:     opts.Command,
-		Path:        artifactPath,
-		SHA256:      opts.SHA256,
-		ExitCode:    &opts.ExitCode,
-		Obligations: covered,
+		ID:               opts.ID,
+		Kind:             opts.Kind,
+		Producer:         producer,
+		Command:          opts.Command,
+		Path:             artifactPath,
+		SHA256:           opts.SHA256,
+		SignatureBundle:  opts.SignatureBundle,
+		SignerIdentity:   opts.SignerIdentity,
+		SignerOIDCIssuer: opts.SignerOIDCIssuer,
+		ExitCode:         &opts.ExitCode,
+		Obligations:      covered,
 	}
 	manifest.Verification.Artifacts = append(manifest.Verification.Artifacts, artifact)
 	sort.Slice(manifest.Verification.Artifacts, func(i, j int) bool {
@@ -462,6 +474,16 @@ func AttachArtifact(repo string, opts AttachArtifactOptions) (Manifest, Evidence
 		return Manifest{}, EvidenceArtifact{}, err
 	}
 	return manifest, artifact, nil
+}
+
+func validateSignatureMetadata(bundle string, identity string, issuer string) error {
+	if bundle == "" && identity == "" && issuer == "" {
+		return nil
+	}
+	if bundle == "" || identity == "" || issuer == "" {
+		return errors.New("signed artifacts require --signature-bundle, --signer-identity, and --signer-oidc-issuer together")
+	}
+	return nil
 }
 
 func defaultMappedJUnitArtifactPath(artifactID string) string {
