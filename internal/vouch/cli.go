@@ -81,6 +81,10 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		if len(rest) >= 2 && rest[1] == "map" {
 			return junitMap(absRepo, rest[2:], common.json, stdout, stderr, manifest)
 		}
+	case "policy":
+		if len(rest) >= 2 && rest[1] == "simulate" {
+			return policySimulate(absRepo, rest[2:], common.json, stdout, stderr, manifest)
+		}
 	case "verify":
 		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "evidence", rest[1:])
 	case "gate":
@@ -277,6 +281,10 @@ func manifestAttachArtifact(repo string, args []string, jsonOut bool, stdout io.
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(stderr, "manifest attach-artifact: unexpected argument %q\n", flags.Arg(0))
+		return 2
+	}
 	if *manifestPath == "" {
 		*manifestPath = defaultManifest
 	}
@@ -322,6 +330,10 @@ func junitMap(repo string, args []string, jsonOut bool, stdout io.Writer, stderr
 	testMapPath := flags.String("test-map", "", "test map path")
 	outPath := flags.String("out", "", "mapped JUnit XML output path")
 	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(stderr, "junit map: unexpected argument %q\n", flags.Arg(0))
 		return 2
 	}
 	if *manifestPath == "" {
@@ -552,11 +564,56 @@ func manifestCheck(repo string, manifestPath string, stdout io.Writer, stderr io
 	return 0
 }
 
+func policySimulate(repo string, args []string, jsonOut bool, stdout io.Writer, stderr io.Writer, defaultManifest string) int {
+	flags := flag.NewFlagSet("policy simulate", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	manifestPath := flags.String("manifest", "", "manifest path")
+	policyPath := flags.String("policy", "", "release policy path")
+	requireSigned := flags.Bool("require-signed", false, "require cosign-verified evidence artifacts")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(stderr, "policy simulate: unexpected argument %q\n", flags.Arg(0))
+		return 2
+	}
+	if *manifestPath == "" {
+		*manifestPath = defaultManifest
+	}
+	evidence, err := CollectEvidenceWithOptions(repo, *manifestPath, CollectEvidenceOptions{
+		RequireSigned: *requireSigned,
+		PolicyPath:    *policyPath,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	simulation := PolicySimulation{
+		Version:    PolicySimulationVersion,
+		PolicyPath: evidence.PolicyPath,
+		Input:      PolicyInputFromEvidence(evidence),
+		Result:     evidence.PolicyResult,
+	}
+	if jsonOut {
+		return renderCommandJSON(simulation, stdout, stderr)
+	}
+	fmt.Fprintf(stdout, "Policy: %s\n", simulation.PolicyPath)
+	fmt.Fprintf(stdout, "Decision: %s\n", simulation.Result.Decision)
+	if len(simulation.Result.RulesFired) > 0 {
+		fmt.Fprintf(stdout, "Rules fired: %s\n", strings.Join(simulation.Result.RulesFired, ", "))
+	}
+	for _, reason := range simulation.Result.Reasons {
+		fmt.Fprintf(stdout, "- %s\n", reason)
+	}
+	return 0
+}
+
 func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.Writer, stderr io.Writer, mode string, args []string) int {
 	flags := flag.NewFlagSet(mode, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	gateOut := ""
 	requireSigned := false
+	policyPath := flags.String("policy", "", "release policy path")
 	if mode == "gate" {
 		flags.StringVar(&gateOut, "out", "", "path to write compact gate result JSON")
 		flags.BoolVar(&requireSigned, "require-signed", false, "require cosign-verified evidence artifacts")
@@ -568,7 +625,7 @@ func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.
 		fmt.Fprintf(stderr, "%s: unexpected argument %q\n", mode, flags.Arg(0))
 		return 2
 	}
-	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: requireSigned})
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: requireSigned, PolicyPath: *policyPath})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -626,7 +683,8 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  manifest create --task-id ID --summary TEXT --agent NAME --run-id ID --out FILE")
 	fmt.Fprintln(out, "  manifest attach-artifact --manifest FILE --id ID --kind KIND --path FILE --exit-code N [--signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE")
 	fmt.Fprintln(out, "  junit map --manifest FILE --junit FILE --test-map FILE --out FILE")
-	fmt.Fprintln(out, "  verify")
-	fmt.Fprintln(out, "  gate [--out FILE] [--require-signed]")
-	fmt.Fprintln(out, "  evidence")
+	fmt.Fprintln(out, "  policy simulate [--manifest FILE] [--policy FILE] [--require-signed]")
+	fmt.Fprintln(out, "  verify [--policy FILE]")
+	fmt.Fprintln(out, "  gate [--policy FILE] [--out FILE] [--require-signed]")
+	fmt.Fprintln(out, "  evidence [--policy FILE]")
 }

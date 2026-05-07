@@ -62,6 +62,7 @@ This creates:
 - `.vouch/config.json`
 - `.vouch/intents/`
 - `.vouch/specs/`
+- `.vouch/policy/release-policy.json`
 - `.vouch/manifests/`
 - `.vouch/artifacts/`
 - `.vouch/build/`
@@ -248,6 +249,19 @@ vouch --repo /path/to/your/repo \
   gate
 ```
 
+Vouch loads release policy from `.vouch/policy/release-policy.json` by default.
+Pass `--policy` to simulate or gate with a different policy file:
+
+```sh
+vouch --repo /path/to/your/repo \
+  --manifest .vouch/manifests/run-123.json \
+  policy simulate --policy .vouch/policy/release-policy.json
+
+vouch --repo /path/to/your/repo \
+  --manifest .vouch/manifests/run-123.json \
+  gate --policy .vouch/policy/release-policy.json
+```
+
 Possible decisions:
 
 - `block`: required evidence is missing or invalid.
@@ -308,11 +322,12 @@ Today, Vouch can check:
 - Artifact exit codes are present and zero.
 - Optional artifact SHA-256 values match file contents.
 - Optional `gate --require-signed` mode verifies evidence artifacts with cosign bundles and expected signer identities.
+- Release policy is loaded from `.vouch/policy/release-policy.json` or an explicit `--policy` file.
 - JUnit evidence has no failure/error/skipped testcases and covers required test obligations.
 - Raw pytest/JUnit testcases can be mapped through `.vouch/test-map.json`.
 - Generic JSON/text artifacts contain exact obligation IDs and optional passing status.
 - Compact gate results can be written to a JSON artifact file.
-- Release decisions follow deterministic risk and evidence rules.
+- Release decisions follow deterministic policy rules.
 
 Today, Vouch cannot check:
 
@@ -320,7 +335,7 @@ Today, Vouch cannot check:
 - Whether a generic JSON/text artifact is truthful beyond its structure, IDs, status, path, exit code, and optional hash.
 - Whether tests were actually run unless the external runner preserves and signs the artifact chain.
 - Whether product intent was inferred correctly from code.
-- Whether release policy is team-defined; policy is still hard-coded Go logic.
+- Whether release policy uses a general-purpose policy language such as Rego; the current policy evaluator is a small Vouch JSON rule engine.
 - Whether signed evidence is bound to a canonical bundle that includes manifest identity, artifact hashes, and covered obligation IDs.
 
 ## Validation Status
@@ -406,6 +421,7 @@ The current implementation is early. Policy is still hard-coded, generic non-JUn
 | `plan build` | IR plus change manifest | `vouch.plan.v0` verification plan |
 | `artifacts build` | Spec JSON | runner/verifier/release artifacts |
 | `junit map` | raw pytest/JUnit and `.vouch/test-map.json` | Vouch-compatible JUnit evidence |
+| `policy simulate` | manifest, evidence, and release policy | policy input and release decision |
 | `evidence`, `verify`, `gate` | manifest and linked artifacts | findings and release decision |
 | Generic onboarding | repo shape and changed files | `.vouch` layout, contract suggestions, manifests, attached artifacts |
 
@@ -601,9 +617,10 @@ vouch --repo DIR --manifest FILE manifest check
 vouch --repo DIR manifest create --task-id ID --summary TEXT --agent NAME --run-id ID --out FILE
 vouch --repo DIR --manifest FILE manifest attach-artifact --id ID --kind KIND --path FILE --exit-code N [--signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE
 vouch --repo DIR --manifest FILE junit map --junit FILE --test-map FILE --out FILE
-vouch --repo DIR --manifest FILE verify
-vouch --repo DIR --manifest FILE gate [--out FILE] [--require-signed]
-vouch --repo DIR --manifest FILE evidence
+vouch --repo DIR --manifest FILE policy simulate [--policy FILE] [--require-signed]
+vouch --repo DIR --manifest FILE verify [--policy FILE]
+vouch --repo DIR --manifest FILE gate [--policy FILE] [--out FILE] [--require-signed]
+vouch --repo DIR --manifest FILE evidence [--policy FILE]
 ```
 
 `--json` emits machine-readable evidence for commands that collect evidence. For `gate`, `--json` emits the compact gate result to stdout and `--out FILE` writes the same gate-result shape as a JSON artifact.

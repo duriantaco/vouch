@@ -1388,6 +1388,192 @@ func TestGateCommandWritesGateResultFile(t *testing.T) {
 	}
 }
 
+func TestCustomPolicyOverridesReleaseDecision(t *testing.T) {
+	root := repoRoot(t)
+	demo := filepath.Join(root, "demo_repo")
+	tmp := t.TempDir()
+	policyPath := filepath.Join(tmp, "freeze-policy.json")
+	writeJSON(t, policyPath, ReleasePolicy{
+		Version: PolicySchemaVersion,
+		Rules: []PolicyRule{{
+			ID:       "release_freeze",
+			When:     PolicyCondition{Fact: "always"},
+			Decision: "human_escalation",
+			Reasons:  []string{"release freeze requires human approval"},
+			Stop:     true,
+		}},
+	})
+	evidence, err := CollectEvidenceWithOptions(demo, filepath.Join(demo, ".vouch", "manifests", "pass.json"), CollectEvidenceOptions{PolicyPath: policyPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "human_escalation" {
+		t.Fatalf("expected custom policy decision, got %s", evidence.Decision)
+	}
+	if evidence.PolicyResult.FiredPolicyRule != "release_freeze" {
+		t.Fatalf("expected custom policy rule, got %#v", evidence.PolicyResult)
+	}
+	if !contains(evidence.Reasons, "release freeze requires human approval") {
+		t.Fatalf("expected custom policy reason, got %#v", evidence.Reasons)
+	}
+}
+
+func TestCustomPolicyCannotBypassSignedEvidenceFailures(t *testing.T) {
+	root := repoRoot(t)
+	demo := filepath.Join(root, "demo_repo")
+	tmp := t.TempDir()
+	policyPath := filepath.Join(tmp, "unsafe-policy.json")
+	writeJSON(t, policyPath, ReleasePolicy{
+		Version: PolicySchemaVersion,
+		Rules: []PolicyRule{{
+			ID:       "unsafe_auto_merge",
+			When:     PolicyCondition{Fact: "always"},
+			Decision: "auto_merge",
+			Reasons:  []string{"unsafe policy tried to auto merge"},
+			Stop:     true,
+		}},
+	})
+	evidence, err := CollectEvidenceWithOptions(demo, filepath.Join(demo, ".vouch", "manifests", "pass.json"), CollectEvidenceOptions{
+		RequireSigned: true,
+		PolicyPath:    policyPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected policy floor to block signed evidence failures, got %s", evidence.Decision)
+	}
+	if !contains(evidence.PolicyResult.RulesFired, "policy_floor_block") {
+		t.Fatalf("expected policy floor rule to fire: %#v", evidence.PolicyResult)
+	}
+	if !containsSubstring(evidence.Reasons, "evidence artifact behavior-trace is invalid") {
+		t.Fatalf("expected signed evidence failure reason, got %#v", evidence.Reasons)
+	}
+}
+
+func TestPolicyInputIncludesArtifactVerificationState(t *testing.T) {
+	root := repoRoot(t)
+	demo := filepath.Join(root, "demo_repo")
+	evidence, err := CollectEvidence(demo, filepath.Join(demo, ".vouch", "manifests", "pass.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := PolicyInputFromEvidence(evidence)
+	if len(input.ArtifactResults) == 0 {
+		t.Fatal("expected policy input to include artifact results")
+	}
+	if input.HasInvalidEvidence {
+		t.Fatalf("expected passing demo to have no invalid evidence: %#v", input.InvalidEvidence)
+	}
+}
+
+func TestMissingDefaultPolicyFailsClosed(t *testing.T) {
+	repo := t.TempDir()
+	specDir := filepath.Join(repo, ".vouch", "specs")
+	manifestDir := filepath.Join(repo, ".vouch", "manifests")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(specDir, "ui.copy.json"), Spec{
+		Version:    SpecSchemaVersion,
+		ID:         "ui.copy",
+		Owner:      "product",
+		OwnedPaths: []string{"src/ui/**"},
+		Risk:       RiskLow,
+		Behavior:   []string{"button label changes to Save"},
+		Security:   []string{"no secrets introduced"},
+		Tests:      SpecTests{Required: []string{"button label renders"}},
+		Runtime:    SpecRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback:   SpecRollback{Strategy: "revert_commit"},
+	})
+	manifestPath := filepath.Join(manifestDir, "change.json")
+	writeJSON(t, manifestPath, Manifest{
+		Version: ManifestSchemaVersion,
+		Task:    Task{ID: "issue-missing-policy", Summary: "copy update"},
+		Change: Change{
+			Risk:            RiskLow,
+			SpecsTouched:    []string{"ui.copy"},
+			BehaviorChanged: true,
+			ChangedFiles:    []string{"src/ui/copy.ts"},
+		},
+		Verification: Verification{
+			CoversBehavior: []string{"button label changes to Save"},
+			Commands:       []string{"go test ./..."},
+			CoversTests:    []string{"button label renders"},
+			CoversSecurity: []string{"no secrets introduced"},
+			TestResults:    TestResults{Passed: 1},
+		},
+		Runtime:  ManifestRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback: ManifestRollback{Strategy: "revert_commit"},
+	})
+	_, err := CollectEvidence(repo, manifestPath)
+	if err == nil || !strings.Contains(err.Error(), "release policy not found") {
+		t.Fatalf("expected missing policy error, got %v", err)
+	}
+}
+
+func TestPolicySimulateCommandRendersResult(t *testing.T) {
+	root := repoRoot(t)
+	demo := filepath.Join(root, "demo_repo")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{
+		"--repo", demo,
+		"--manifest", filepath.Join(demo, ".vouch", "manifests", "pass.json"),
+		"policy", "simulate",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("policy simulate failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Decision: canary") || !strings.Contains(stdout.String(), "Rules fired: high_risk_canary") {
+		t.Fatalf("unexpected policy simulate output: %s", stdout.String())
+	}
+}
+
+func TestPolicySimulateRejectsUnexpectedArgs(t *testing.T) {
+	root := repoRoot(t)
+	demo := filepath.Join(root, "demo_repo")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{
+		"--repo", demo,
+		"--manifest", filepath.Join(demo, ".vouch", "manifests", "pass.json"),
+		"policy", "simulate", "unexpected",
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("expected usage error, got code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unexpected argument") {
+		t.Fatalf("expected unexpected arg error, got %s", stderr.String())
+	}
+}
+
+func TestPolicySimulateJSONIncludesInputAndResult(t *testing.T) {
+	root := repoRoot(t)
+	demo := filepath.Join(root, "demo_repo")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{
+		"--json",
+		"--repo", demo,
+		"--manifest", filepath.Join(demo, ".vouch", "manifests", "pass.json"),
+		"policy", "simulate",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("policy simulate json failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var simulation PolicySimulation
+	if err := json.Unmarshal(stdout.Bytes(), &simulation); err != nil {
+		t.Fatal(err)
+	}
+	if simulation.Result.Decision != "canary" || simulation.Input.Risk != RiskHigh {
+		t.Fatalf("unexpected simulation: %#v", simulation)
+	}
+}
+
 func TestRequireSignedBlocksUnsignedArtifacts(t *testing.T) {
 	root := repoRoot(t)
 	demo := filepath.Join(root, "demo_repo")
@@ -1661,11 +1847,18 @@ func writeScenario(t *testing.T, spec Spec, manifest Manifest) (string, string) 
 	t.Helper()
 	repo := t.TempDir()
 	specDir := filepath.Join(repo, ".vouch", "specs")
+	policyDir := filepath.Join(repo, ".vouch", "policy")
 	manifestDir := filepath.Join(repo, ".vouch", "manifests")
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(policyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDefaultReleasePolicy(filepath.Join(policyDir, "release-policy.json")); err != nil {
 		t.Fatal(err)
 	}
 	writeJSON(t, filepath.Join(specDir, spec.ID+".json"), spec)

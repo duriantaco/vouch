@@ -77,7 +77,9 @@ decisions.
 OPA is the best near-term candidate for moving policy out of Go. Vouch should
 prepare a compact policy input that includes manifest data, spec risk, coverage,
 findings, invalid evidence, and signer/provenance status. The policy output
-should be the release decision and reasons.
+should be the release decision and reasons. The current implementation uses a
+small Vouch JSON rule engine for that policy boundary; Rego remains the likely
+next step if the policy input shape proves stable.
 
 ### Conftest
 
