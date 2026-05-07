@@ -954,7 +954,7 @@ func resolveRepoOutput(repo string, path string) string {
 func obligationsForEvidenceKind(symbols SymbolTable, kind EvidenceKind) []string {
 	var ids []string
 	for id, obligation := range symbols.Obligations {
-		if obligation.RequiredEvidence == kind {
+		if kind == EvidenceVerifierOutput || obligation.RequiredEvidence == kind {
 			ids = append(ids, id)
 		}
 	}

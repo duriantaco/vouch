@@ -63,6 +63,7 @@ Implemented today:
 - Machine-readable gate result artifact output for status checks.
 - Release policy files loaded from `.vouch/policy/release-policy.json`.
 - Policy simulation command with structured policy input/output.
+- Structured verifier output artifacts imported into findings and policy input.
 - Release decisions: `block`, `human_escalation`, `canary`, `auto_merge`.
 - Demo repo with blocked and passing manifests.
 - Unit tests for the current pipeline.
@@ -151,12 +152,17 @@ This phase should wait until evidence provenance and policy semantics are in
 place. A verifier finding is useful only when the verifier output is tied to a
 runner identity and the release policy says how to use it.
 
-Planned work:
+Implemented base:
 
-- Verifier input packet schema.
+- Verifier input packets include prompt-version and output-schema pins.
+- Structured `vouch.verifier_output.v0` artifacts can be linked from manifests.
+- Verifier output findings are imported into the normal policy path.
+- Malformed verifier outputs invalidate evidence.
+- Verifier output artifacts are excluded from required evidence coverage.
+
+Remaining work:
+
 - Signed verifier output schema.
-- Structured verifier output schema.
-- Prompt and model version pinning.
 - Verifier confidence and disagreement handling.
 - Verifier isolation rules.
 - Audit log for every verifier decision.

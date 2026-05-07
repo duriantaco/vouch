@@ -51,10 +51,13 @@ func verifierPackets(ir IR) []VerifierPacket {
 	var packets []VerifierPacket
 	for _, role := range verifierRoles(ir) {
 		packets = append(packets, VerifierPacket{
-			Verifier:       role,
-			Focus:          verifierFocus(role),
-			Obligations:    obligationsForVerifier(ir, role),
-			RequiredOutput: "Return structured findings with verifier, decision, severity, claim, evidence, and required_fix.",
+			Verifier:      role,
+			Focus:         verifierFocus(role),
+			PromptVersion: VerifierPromptVersion,
+			OutputSchema:  VerifierOutputVersion,
+			Obligations:   obligationsForVerifier(ir, role),
+			RequiredOutput: "Return JSON matching " + VerifierOutputVersion + " with version, verifier, prompt_version, model, obligations, confidence, and findings. " +
+				"Each finding must include verifier, decision, severity, claim, evidence, required_fix when blocking, and obligation IDs.",
 		})
 	}
 	return packets

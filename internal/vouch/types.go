@@ -15,6 +15,8 @@ const (
 	PolicyInputVersion      = "vouch.policy_input.v0"
 	PolicyResultVersion     = "vouch.policy_result.v0"
 	PolicySimulationVersion = "vouch.policy_simulation.v0"
+	VerifierPromptVersion   = "vouch.verifier_prompt.v0"
+	VerifierOutputVersion   = "vouch.verifier_output.v0"
 )
 
 const (
@@ -71,11 +73,12 @@ const (
 type EvidenceKind string
 
 const (
-	EvidenceBehaviorTrace EvidenceKind = "behavior_trace"
-	EvidenceSecurityCheck EvidenceKind = "security_check"
-	EvidenceTestCoverage  EvidenceKind = "test_coverage"
-	EvidenceRuntimeMetric EvidenceKind = "runtime_metric"
-	EvidenceRollbackPlan  EvidenceKind = "rollback_plan"
+	EvidenceBehaviorTrace  EvidenceKind = "behavior_trace"
+	EvidenceSecurityCheck  EvidenceKind = "security_check"
+	EvidenceTestCoverage   EvidenceKind = "test_coverage"
+	EvidenceRuntimeMetric  EvidenceKind = "runtime_metric"
+	EvidenceRollbackPlan   EvidenceKind = "rollback_plan"
+	EvidenceVerifierOutput EvidenceKind = "verifier_output"
 )
 
 type Intent struct {
@@ -156,6 +159,8 @@ type VerificationPlan struct {
 type VerifierPacket struct {
 	Verifier       string       `json:"verifier"`
 	Focus          string       `json:"focus"`
+	PromptVersion  string       `json:"prompt_version"`
+	OutputSchema   string       `json:"output_schema"`
 	Obligations    []Obligation `json:"obligations"`
 	RequiredOutput string       `json:"required_output"`
 }
@@ -261,16 +266,28 @@ type ManifestRollback struct {
 }
 
 type Finding struct {
-	Verifier    string `json:"verifier"`
-	Severity    string `json:"severity"`
-	Decision    string `json:"decision"`
-	Claim       string `json:"claim"`
-	Evidence    string `json:"evidence"`
-	RequiredFix string `json:"required_fix"`
+	Verifier    string   `json:"verifier"`
+	Severity    string   `json:"severity"`
+	Decision    string   `json:"decision"`
+	Claim       string   `json:"claim"`
+	Evidence    string   `json:"evidence"`
+	RequiredFix string   `json:"required_fix"`
+	Obligations []string `json:"obligations,omitempty"`
 }
 
 func (f Finding) Blocks() bool {
 	return f.Decision == "block"
+}
+
+type VerifierOutput struct {
+	Version       string    `json:"version"`
+	Verifier      string    `json:"verifier"`
+	PromptVersion string    `json:"prompt_version"`
+	Model         string    `json:"model"`
+	Obligations   []string  `json:"obligations"`
+	Confidence    float64   `json:"confidence,omitempty"`
+	Findings      []Finding `json:"findings"`
+	Disagreements []string  `json:"disagreements,omitempty"`
 }
 
 type ReleasePolicy struct {
@@ -309,6 +326,7 @@ type PolicyInput struct {
 	ManifestErrors           []string            `json:"manifest_errors"`
 	ArtifactResults          []ArtifactResult    `json:"artifact_results"`
 	InvalidEvidence          []InvalidEvidence   `json:"invalid_evidence"`
+	VerifierOutputs          []VerifierOutput    `json:"verifier_outputs"`
 	MissingObligations       map[string][]string `json:"missing_obligations"`
 	CoveredObligations       map[string][]string `json:"covered_obligations"`
 	Findings                 []Finding           `json:"findings"`
@@ -353,6 +371,7 @@ type Evidence struct {
 	ManifestErrors         []string                    `json:"manifest_errors"`
 	ArtifactResults        []ArtifactResult            `json:"artifact_results"`
 	InvalidEvidence        []InvalidEvidence           `json:"invalid_evidence"`
+	VerifierOutputs        []VerifierOutput            `json:"verifier_outputs"`
 	RequiredObligations    map[string][]Obligation     `json:"required_obligations"`
 	CoveredObligations     map[string][]Obligation     `json:"covered_obligations"`
 	MissingObligations     map[string][]Obligation     `json:"missing_obligations"`
@@ -375,16 +394,18 @@ type CompilationStats struct {
 }
 
 type ArtifactResult struct {
-	ID                 string       `json:"id"`
-	Kind               EvidenceKind `json:"kind"`
-	Path               string       `json:"path,omitempty"`
-	ResolvedPath       string       `json:"resolved_path,omitempty"`
-	Status             string       `json:"status"`
-	HashVerified       bool         `json:"hash_verified"`
-	SignatureVerified  bool         `json:"signature_verified"`
-	CoveredObligations []string     `json:"covered_obligations"`
-	FailedTests        []string     `json:"failed_tests,omitempty"`
-	Issues             []string     `json:"issues,omitempty"`
+	ID                 string          `json:"id"`
+	Kind               EvidenceKind    `json:"kind"`
+	Path               string          `json:"path,omitempty"`
+	ResolvedPath       string          `json:"resolved_path,omitempty"`
+	Status             string          `json:"status"`
+	HashVerified       bool            `json:"hash_verified"`
+	SignatureVerified  bool            `json:"signature_verified"`
+	CoveredObligations []string        `json:"covered_obligations"`
+	VerifierOutput     *VerifierOutput `json:"-"`
+	VerifierFindings   []Finding       `json:"verifier_findings,omitempty"`
+	FailedTests        []string        `json:"failed_tests,omitempty"`
+	Issues             []string        `json:"issues,omitempty"`
 }
 
 type InvalidEvidence struct {

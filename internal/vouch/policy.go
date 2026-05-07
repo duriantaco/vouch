@@ -228,6 +228,7 @@ func PolicyInputFromEvidence(evidence Evidence) PolicyInput {
 		ManifestErrors:           cloneStrings(evidence.ManifestErrors),
 		ArtifactResults:          cloneArtifactResults(evidence.ArtifactResults),
 		InvalidEvidence:          cloneInvalidEvidence(evidence.InvalidEvidence),
+		VerifierOutputs:          cloneVerifierOutputs(evidence.VerifierOutputs),
 		MissingObligations:       obligationTextMap(evidence.MissingObligations),
 		CoveredObligations:       obligationTextMap(evidence.CoveredObligations),
 		Findings:                 cloneFindings(evidence.Findings),
@@ -246,6 +247,11 @@ func WriteDefaultReleasePolicy(path string) error {
 
 func cloneFindings(values []Finding) []Finding {
 	out := make([]Finding, 0, len(values))
+	return append(out, values...)
+}
+
+func cloneVerifierOutputs(values []VerifierOutput) []VerifierOutput {
+	out := make([]VerifierOutput, 0, len(values))
 	return append(out, values...)
 }
 
