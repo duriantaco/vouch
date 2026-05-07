@@ -175,6 +175,7 @@ If an artifact does not include the exact obligation ID, Vouch will not count it
 ### 6. Attach Evidence
 
 Attach behavior, security, test, runtime, and rollback evidence as needed. The artifact kind must match the obligation kind.
+`verifier_output` artifacts are the exception: they may reference any compiled obligation, import structured verifier findings, and do not satisfy required evidence coverage by themselves.
 
 | Obligation ID Contains | Attach With `--kind` |
 | --- | --- |
@@ -323,6 +324,9 @@ Today, Vouch can check:
 - Optional artifact SHA-256 values match file contents.
 - Optional `gate --require-signed` mode verifies evidence artifacts with cosign bundles and expected signer identities.
 - Release policy is loaded from `.vouch/policy/release-policy.json` or an explicit `--policy` file.
+- Generated verifier packets pin prompt and output schema versions.
+- Structured `verifier_output` artifacts parse as `vouch.verifier_output.v0` and import pass/block findings into release policy.
+- `verifier_output` artifacts do not count as required behavior, security, test, runtime, or rollback evidence.
 - JUnit evidence has no failure/error/skipped testcases and covers required test obligations.
 - Raw pytest/JUnit testcases can be mapped through `.vouch/test-map.json`.
 - Generic JSON/text artifacts contain exact obligation IDs and optional passing status.
@@ -332,6 +336,7 @@ Today, Vouch can check:
 Today, Vouch cannot check:
 
 - Whether arbitrary code semantically implements the declared behavior.
+- Whether an AI verifier's judgment is correct beyond its structured output, obligation references, model/prompt pins, and artifact provenance.
 - Whether a generic JSON/text artifact is truthful beyond its structure, IDs, status, path, exit code, and optional hash.
 - Whether tests were actually run unless the external runner preserves and signs the artifact chain.
 - Whether product intent was inferred correctly from code.

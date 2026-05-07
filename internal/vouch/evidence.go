@@ -49,6 +49,7 @@ func CollectEvidenceWithOptions(repo string, manifestPath string, opts CollectEv
 		ManifestErrors:         pipeline.ManifestErrors,
 		ArtifactResults:        []ArtifactResult{},
 		InvalidEvidence:        []InvalidEvidence{},
+		VerifierOutputs:        []VerifierOutput{},
 		RequiredObligations:    make(map[string][]Obligation),
 		CoveredObligations:     make(map[string][]Obligation),
 		MissingObligations:     make(map[string][]Obligation),
@@ -65,6 +66,7 @@ func CollectEvidenceWithOptions(repo string, manifestPath string, opts CollectEv
 	evidence.ArtifactResults, evidence.InvalidEvidence = LinkEvidenceArtifacts(absRepo, manifest.Verification.Artifacts, obligationIndex, ArtifactLinkOptions{RequireSigned: opts.RequireSigned})
 	buildCoverage(&evidence)
 	runVerifiers(&evidence)
+	importVerifierFindings(&evidence)
 	policy, policyPath, err := LoadReleasePolicy(absRepo, opts.PolicyPath)
 	if err != nil {
 		return Evidence{}, err
@@ -141,6 +143,9 @@ func artifactCoverageByKind(artifacts []ArtifactResult) map[EvidenceKind]map[str
 		if artifact.Status != "valid" {
 			continue
 		}
+		if artifact.Kind == EvidenceVerifierOutput {
+			continue
+		}
 		if coverage[artifact.Kind] == nil {
 			coverage[artifact.Kind] = make(map[string]bool)
 		}
@@ -149,6 +154,16 @@ func artifactCoverageByKind(artifacts []ArtifactResult) map[EvidenceKind]map[str
 		}
 	}
 	return coverage
+}
+
+func importVerifierFindings(evidence *Evidence) {
+	for _, result := range evidence.ArtifactResults {
+		if result.VerifierOutput == nil {
+			continue
+		}
+		evidence.VerifierOutputs = append(evidence.VerifierOutputs, *result.VerifierOutput)
+		evidence.Findings = append(evidence.Findings, result.VerifierFindings...)
+	}
 }
 
 func runVerifiers(evidence *Evidence) {

@@ -97,7 +97,7 @@ func validRisk(risk Risk) bool {
 
 func validEvidenceKind(kind EvidenceKind) bool {
 	switch kind {
-	case EvidenceBehaviorTrace, EvidenceSecurityCheck, EvidenceTestCoverage, EvidenceRuntimeMetric, EvidenceRollbackPlan:
+	case EvidenceBehaviorTrace, EvidenceSecurityCheck, EvidenceTestCoverage, EvidenceRuntimeMetric, EvidenceRollbackPlan, EvidenceVerifierOutput:
 		return true
 	default:
 		return false

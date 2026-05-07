@@ -361,6 +361,21 @@ func TestArtifactsBuildDeterministically(t *testing.T) {
 	if !bytes.Equal(first, second) {
 		t.Fatal("artifact generation should be deterministic")
 	}
+	var packets []VerifierPacket
+	if err := json.Unmarshal(first, &packets); err != nil {
+		t.Fatal(err)
+	}
+	if len(packets) == 0 {
+		t.Fatal("expected verifier packets")
+	}
+	for _, packet := range packets {
+		if packet.PromptVersion != VerifierPromptVersion || packet.OutputSchema != VerifierOutputVersion {
+			t.Fatalf("expected verifier packet schema pins, got %#v", packet)
+		}
+		if !strings.Contains(packet.RequiredOutput, VerifierOutputVersion) {
+			t.Fatalf("expected required output to name verifier output schema, got %q", packet.RequiredOutput)
+		}
+	}
 	for _, name := range []string{"verification-plan.json", "verifier-packets.json", "test-obligations.json", "release-policy.json"} {
 		if _, err := os.Stat(filepath.Join(out, name)); err != nil {
 			t.Fatalf("missing artifact %s: %v", name, err)
@@ -1467,6 +1482,141 @@ func TestPolicyInputIncludesArtifactVerificationState(t *testing.T) {
 	}
 }
 
+func TestVerifierOutputFindingBlocksReleasePolicy(t *testing.T) {
+	var behaviorID string
+	repo, manifestPath, _ := writeFullyCoveredUIScenario(t, func(ids map[ObligationKind]string) []EvidenceArtifact {
+		behaviorID = ids[ObligationBehavior]
+		return []EvidenceArtifact{
+			unsignedArtifact("ai-review", EvidenceVerifierOutput, "artifacts/verifier-block.json", behaviorID),
+		}
+	})
+	writeVerifierOutputArtifact(t, repo, "artifacts/verifier-block.json", VerifierOutput{
+		Version:       VerifierOutputVersion,
+		Verifier:      "spec_adherence",
+		PromptVersion: VerifierPromptVersion,
+		Model:         "gpt-5.2",
+		Obligations:   []string{behaviorID},
+		Confidence:    0.82,
+		Findings: []Finding{{
+			Verifier:    "spec_adherence",
+			Severity:    "high",
+			Decision:    "block",
+			Claim:       "behavior artifact does not prove the saved label state",
+			Evidence:    "artifact references the obligation ID but does not include a state trace",
+			RequiredFix: "attach a behavior trace that exercises the saved label state",
+			Obligations: []string{behaviorID},
+		}},
+	})
+	evidence, err := CollectEvidence(repo, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected verifier output to block, got %s", evidence.Decision)
+	}
+	if !hasFinding(evidence, "spec_adherence", "behavior artifact does not prove") {
+		t.Fatalf("expected imported verifier finding: %#v", evidence.Findings)
+	}
+	if len(evidence.VerifierOutputs) != 1 {
+		t.Fatalf("expected verifier output to be imported: %#v", evidence.VerifierOutputs)
+	}
+	if !contains(evidence.PolicyResult.RulesFired, "block_verifier_findings") {
+		t.Fatalf("expected policy to block on verifier finding: %#v", evidence.PolicyResult)
+	}
+	input := PolicyInputFromEvidence(evidence)
+	if len(input.VerifierOutputs) != 1 || !input.HasBlockingFindings {
+		t.Fatalf("expected policy input to include verifier output and blocking finding: %#v", input)
+	}
+}
+
+func TestMalformedVerifierOutputInvalidatesEvidence(t *testing.T) {
+	var behaviorID string
+	repo, manifestPath, _ := writeFullyCoveredUIScenario(t, func(ids map[ObligationKind]string) []EvidenceArtifact {
+		behaviorID = ids[ObligationBehavior]
+		return []EvidenceArtifact{
+			unsignedArtifact("ai-review", EvidenceVerifierOutput, "artifacts/verifier-bad.json", behaviorID),
+		}
+	})
+	writeArtifact(t, repo, "artifacts/verifier-bad.json", `{
+  "version": "vouch.verifier_output.old",
+  "verifier": "spec_adherence",
+  "prompt_version": "vouch.verifier_prompt.v0",
+  "obligations": ["`+behaviorID+`"],
+  "findings": []
+}`)
+	evidence, err := CollectEvidence(repo, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected malformed verifier output to block, got %s", evidence.Decision)
+	}
+	if !hasInvalidEvidence(evidence, "ai-review", "verifier_output_import") {
+		t.Fatalf("expected verifier output import failure: %#v", evidence.InvalidEvidence)
+	}
+	if !hasFinding(evidence, "evidence_linker", "evidence artifact ai-review is invalid") {
+		t.Fatalf("expected invalid verifier output finding: %#v", evidence.Findings)
+	}
+}
+
+func TestVerifierOutputDoesNotSatisfyRequiredEvidenceCoverage(t *testing.T) {
+	spec := sampleUISpec()
+	behaviorID := obligationID(t, spec, ObligationBehavior, "button label changes to Save")
+	securityID := obligationID(t, spec, ObligationSecurity, "no secrets introduced")
+	testID := obligationID(t, spec, ObligationRequiredTest, "button label renders")
+	runtimeID := obligationID(t, spec, ObligationRuntimeSignal, "ui.rendered")
+	rollbackID := obligationID(t, spec, ObligationRollback, "revert_commit")
+	allIDs := []string{behaviorID, securityID, testID, runtimeID, rollbackID}
+	repo, manifestPath := writeScenario(t, spec, Manifest{
+		Version: ManifestSchemaVersion,
+		Task:    Task{ID: "issue-verifier-only", Summary: "verifier only"},
+		Change: Change{
+			Risk:            RiskLow,
+			SpecsTouched:    []string{"ui.copy"},
+			BehaviorChanged: true,
+			ChangedFiles:    []string{"src/ui/copy.ts"},
+		},
+		Verification: Verification{
+			Commands:    []string{"ai verifier"},
+			TestResults: TestResults{Passed: 1},
+			Artifacts: []EvidenceArtifact{
+				unsignedArtifact("ai-review", EvidenceVerifierOutput, "artifacts/verifier-pass.json", allIDs...),
+			},
+		},
+		Runtime:  ManifestRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback: ManifestRollback{Strategy: "revert_commit"},
+	})
+	writeVerifierOutputArtifact(t, repo, "artifacts/verifier-pass.json", VerifierOutput{
+		Version:       VerifierOutputVersion,
+		Verifier:      "spec_adherence",
+		PromptVersion: VerifierPromptVersion,
+		Model:         "gpt-5.2",
+		Obligations:   allIDs,
+		Confidence:    0.74,
+		Findings: []Finding{{
+			Verifier:    "spec_adherence",
+			Severity:    "low",
+			Decision:    "pass",
+			Claim:       "verifier found no contradiction in the submitted evidence",
+			Evidence:    "no non-verifier evidence was attached",
+			Obligations: allIDs,
+		}},
+	})
+	evidence, err := CollectEvidence(repo, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected verifier-only evidence to block, got %s", evidence.Decision)
+	}
+	if !missingObligation(evidence, "ui.copy", ObligationBehavior, "button label changes to Save") {
+		t.Fatalf("verifier output should not satisfy behavior coverage: %#v", evidence.CoveredObligations["ui.copy"])
+	}
+	if len(evidence.CoveredObligations["ui.copy"]) != 0 {
+		t.Fatalf("verifier output should not count as required evidence coverage: %#v", evidence.CoveredObligations["ui.copy"])
+	}
+}
+
 func TestMissingDefaultPolicyFailsClosed(t *testing.T) {
 	repo := t.TempDir()
 	specDir := filepath.Join(repo, ".vouch", "specs")
@@ -1843,6 +1993,81 @@ func exitCode(code int) *int {
 	return &code
 }
 
+func sampleUISpec() Spec {
+	return Spec{
+		Version:    SpecSchemaVersion,
+		ID:         "ui.copy",
+		Owner:      "product",
+		OwnedPaths: []string{"src/ui/**"},
+		Risk:       RiskLow,
+		Behavior:   []string{"button label changes to Save"},
+		Security:   []string{"no secrets introduced"},
+		Tests:      SpecTests{Required: []string{"button label renders"}},
+		Runtime:    SpecRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback:   SpecRollback{Strategy: "revert_commit"},
+	}
+}
+
+func unsignedArtifact(id string, kind EvidenceKind, path string, obligations ...string) EvidenceArtifact {
+	return EvidenceArtifact{
+		ID:          id,
+		Kind:        kind,
+		Producer:    "ci",
+		Path:        path,
+		ExitCode:    exitCode(0),
+		Obligations: obligations,
+	}
+}
+
+func writeFullyCoveredUIScenario(t *testing.T, extra func(map[ObligationKind]string) []EvidenceArtifact) (string, string, map[ObligationKind]string) {
+	t.Helper()
+	spec := sampleUISpec()
+	ids := map[ObligationKind]string{
+		ObligationBehavior:      obligationID(t, spec, ObligationBehavior, "button label changes to Save"),
+		ObligationSecurity:      obligationID(t, spec, ObligationSecurity, "no secrets introduced"),
+		ObligationRequiredTest:  obligationID(t, spec, ObligationRequiredTest, "button label renders"),
+		ObligationRuntimeSignal: obligationID(t, spec, ObligationRuntimeSignal, "ui.rendered"),
+		ObligationRollback:      obligationID(t, spec, ObligationRollback, "revert_commit"),
+	}
+	artifacts := []EvidenceArtifact{
+		unsignedArtifact("behavior", EvidenceBehaviorTrace, "artifacts/behavior.json", ids[ObligationBehavior]),
+		unsignedArtifact("security", EvidenceSecurityCheck, "artifacts/security.json", ids[ObligationSecurity]),
+		unsignedArtifact("tests", EvidenceTestCoverage, "artifacts/junit.xml", ids[ObligationRequiredTest]),
+		unsignedArtifact("runtime", EvidenceRuntimeMetric, "artifacts/runtime.json", ids[ObligationRuntimeSignal]),
+		unsignedArtifact("rollback", EvidenceRollbackPlan, "artifacts/rollback.json", ids[ObligationRollback]),
+	}
+	if extra != nil {
+		artifacts = append(artifacts, extra(ids)...)
+	}
+	repo, manifestPath := writeScenario(t, spec, Manifest{
+		Version: ManifestSchemaVersion,
+		Task:    Task{ID: "issue-covered-ui", Summary: "copy update"},
+		Change: Change{
+			Risk:            RiskLow,
+			SpecsTouched:    []string{"ui.copy"},
+			BehaviorChanged: true,
+			ChangedFiles:    []string{"src/ui/copy.ts"},
+		},
+		Verification: Verification{
+			Commands:    []string{"go test ./..."},
+			TestResults: TestResults{Passed: 1},
+			Artifacts:   artifacts,
+		},
+		Runtime:  ManifestRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback: ManifestRollback{Strategy: "revert_commit"},
+	})
+	writeArtifact(t, repo, "artifacts/behavior.json", `{"status":"pass","obligations":["`+ids[ObligationBehavior]+`"]}`)
+	writeArtifact(t, repo, "artifacts/security.json", `{"status":"pass","obligations":["`+ids[ObligationSecurity]+`"]}`)
+	writeArtifact(t, repo, "artifacts/runtime.json", `{"status":"pass","obligations":["`+ids[ObligationRuntimeSignal]+`"]}`)
+	writeArtifact(t, repo, "artifacts/rollback.json", `{"status":"pass","obligations":["`+ids[ObligationRollback]+`"]}`)
+	writeArtifact(t, repo, "artifacts/junit.xml", `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ui.copy" tests="1" failures="0" errors="0" skipped="0">
+  <testcase classname="`+ids[ObligationRequiredTest]+`" name="button label renders" />
+</testsuite>
+`)
+	return repo, manifestPath, ids
+}
+
 func writeScenario(t *testing.T, spec Spec, manifest Manifest) (string, string) {
 	t.Helper()
 	repo := t.TempDir()
@@ -1876,6 +2101,15 @@ func writeArtifact(t *testing.T, repo string, relPath string, data string) {
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeVerifierOutputArtifact(t *testing.T, repo string, relPath string, output VerifierOutput) {
+	t.Helper()
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeArtifact(t, repo, relPath, string(append(data, '\n')))
 }
 
 func installFakeCosign(t *testing.T, exitCode int) {

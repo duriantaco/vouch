@@ -164,7 +164,7 @@ func validateArtifactReferencesWithSymbols(manifest Manifest, symbols SymbolTabl
 				errors = append(errors, fmt.Sprintf("manifest: verification.artifacts[%s] references unknown obligation %q", artifact.ID, obligationID))
 				continue
 			}
-			if artifact.Kind != obligation.RequiredEvidence {
+			if artifact.Kind != EvidenceVerifierOutput && artifact.Kind != obligation.RequiredEvidence {
 				errors = append(errors, fmt.Sprintf("manifest: verification.artifacts[%s] kind %q does not satisfy obligation %s required evidence %q", artifact.ID, artifact.Kind, obligationID, obligation.RequiredEvidence))
 			}
 		}

@@ -1,11 +1,13 @@
 package vouch
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,7 +55,7 @@ func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index Obli
 				result.addIssue("unknown_obligation", fmt.Sprintf("unknown obligation %q", obligationID))
 				continue
 			}
-			if obligation.RequiredEvidence != artifact.Kind {
+			if artifact.Kind != EvidenceVerifierOutput && obligation.RequiredEvidence != artifact.Kind {
 				result.addIssue("kind_mismatch", fmt.Sprintf("kind %q does not satisfy obligation %s required evidence %q", artifact.Kind, obligationID, obligation.RequiredEvidence))
 			}
 		}
@@ -88,7 +90,19 @@ func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index Obli
 			verifyCosignBundle(repo, artifact, result.ResolvedPath, &result)
 		}
 
-		if artifact.Kind == EvidenceTestCoverage {
+		if artifact.Kind == EvidenceVerifierOutput {
+			if len(data) > 0 {
+				output, issues := importVerifierOutput(data, artifact.Obligations, index)
+				if len(issues) == 0 {
+					result.VerifierOutput = &output
+					result.VerifierFindings = cloneFindings(output.Findings)
+					result.CoveredObligations = cloneStrings(output.Obligations)
+				}
+				for _, issue := range issues {
+					result.addIssue("verifier_output_import", issue)
+				}
+			}
+		} else if artifact.Kind == EvidenceTestCoverage {
 			if len(data) > 0 {
 				covered, failed, issues := importJUnitEvidence(data, artifact.Obligations)
 				result.CoveredObligations = covered
@@ -301,6 +315,148 @@ func importGenericEvidence(data []byte, obligationIDs []string) ([]string, []str
 		}
 	}
 	return covered, issues
+}
+
+func importVerifierOutput(data []byte, artifactObligations []string, index ObligationIndex) (VerifierOutput, []string) {
+	var output VerifierOutput
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&output); err != nil {
+		return output, []string{fmt.Sprintf("cannot parse verifier output JSON: %v", err)}
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return output, []string{"trailing JSON content after verifier output"}
+	}
+
+	var issues []string
+	if output.Version != VerifierOutputVersion {
+		issues = append(issues, fmt.Sprintf("version must be %s", VerifierOutputVersion))
+	}
+	if strings.TrimSpace(output.Verifier) == "" {
+		issues = append(issues, "verifier is required")
+	}
+	if output.PromptVersion != VerifierPromptVersion {
+		issues = append(issues, fmt.Sprintf("prompt_version must be %s", VerifierPromptVersion))
+	}
+	if strings.TrimSpace(output.Model) == "" {
+		issues = append(issues, "model is required")
+	}
+	if len(output.Obligations) == 0 {
+		issues = append(issues, "obligations must reference at least one obligation")
+	}
+	if output.Confidence < 0 || output.Confidence > 1 {
+		issues = append(issues, "confidence must be between 0 and 1")
+	}
+	if duplicates := duplicateStrings(output.Obligations); len(duplicates) > 0 {
+		issues = append(issues, "obligations contain duplicate values: "+strings.Join(duplicates, ", "))
+	}
+	if !sameStringSet(output.Obligations, artifactObligations) {
+		issues = append(issues, "output obligations must match manifest artifact obligations")
+	}
+	for _, obligationID := range output.Obligations {
+		if strings.TrimSpace(obligationID) == "" {
+			issues = append(issues, "obligations must be non-empty")
+			continue
+		}
+		if _, ok := index.ByID[obligationID]; !ok {
+			issues = append(issues, fmt.Sprintf("unknown obligation %q", obligationID))
+		}
+	}
+	outputObligations := stringSet(output.Obligations)
+	for i, finding := range output.Findings {
+		issues = append(issues, validateVerifierFinding(output, finding, i, outputObligations, index)...)
+	}
+	return output, issues
+}
+
+func validateVerifierFinding(output VerifierOutput, finding Finding, index int, outputObligations map[string]bool, obligations ObligationIndex) []string {
+	owner := fmt.Sprintf("findings[%d]", index)
+	var issues []string
+	if strings.TrimSpace(finding.Verifier) == "" {
+		issues = append(issues, owner+" verifier is required")
+	} else if finding.Verifier != output.Verifier {
+		issues = append(issues, fmt.Sprintf("%s verifier %q does not match output verifier %q", owner, finding.Verifier, output.Verifier))
+	}
+	if !validVerifierDecision(finding.Decision) {
+		issues = append(issues, fmt.Sprintf("%s decision must be pass or block", owner))
+	}
+	if !validFindingSeverity(finding.Severity) {
+		issues = append(issues, fmt.Sprintf("%s severity must be low, medium, high, or critical", owner))
+	}
+	if strings.TrimSpace(finding.Claim) == "" {
+		issues = append(issues, owner+" claim is required")
+	}
+	if strings.TrimSpace(finding.Evidence) == "" {
+		issues = append(issues, owner+" evidence is required")
+	}
+	if finding.Decision == "block" && strings.TrimSpace(finding.RequiredFix) == "" {
+		issues = append(issues, owner+" required_fix is required for block decisions")
+	}
+	if len(finding.Obligations) == 0 {
+		issues = append(issues, owner+" obligations must reference at least one obligation")
+	}
+	if duplicates := duplicateStrings(finding.Obligations); len(duplicates) > 0 {
+		issues = append(issues, owner+" obligations contain duplicate values: "+strings.Join(duplicates, ", "))
+	}
+	for _, obligationID := range finding.Obligations {
+		if strings.TrimSpace(obligationID) == "" {
+			issues = append(issues, owner+" obligations must be non-empty")
+			continue
+		}
+		if !outputObligations[obligationID] {
+			issues = append(issues, fmt.Sprintf("%s obligation %q is not listed in output obligations", owner, obligationID))
+		}
+		if _, ok := obligations.ByID[obligationID]; !ok {
+			issues = append(issues, fmt.Sprintf("%s references unknown obligation %q", owner, obligationID))
+		}
+	}
+	return issues
+}
+
+func validVerifierDecision(decision string) bool {
+	switch decision {
+	case "pass", "block":
+		return true
+	default:
+		return false
+	}
+}
+
+func validFindingSeverity(severity string) bool {
+	switch severity {
+	case "low", "medium", "high", "critical":
+		return true
+	default:
+		return false
+	}
+}
+
+func sameStringSet(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	set := stringSet(left)
+	if len(set) != len(left) {
+		return false
+	}
+	for _, value := range right {
+		if !set[value] {
+			return false
+		}
+	}
+	return true
+}
+
+func duplicateStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	duplicates := []string{}
+	for _, value := range values {
+		if seen[value] && !containsString(duplicates, value) {
+			duplicates = append(duplicates, value)
+		}
+		seen[value] = true
+	}
+	return duplicates
 }
 
 func artifactStatusIssue(data []byte) (string, bool) {
