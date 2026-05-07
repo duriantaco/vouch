@@ -72,6 +72,7 @@ func InitRepo(repo string, profileOverride string, force bool) (InitResult, erro
 		".vouch",
 		".vouch/intents",
 		".vouch/specs",
+		".vouch/policy",
 		config.ManifestDir,
 		config.ArtifactDir,
 		config.BuildDir,
@@ -93,6 +94,14 @@ func InitRepo(repo string, profileOverride string, force bool) (InitResult, erro
 			return InitResult{}, err
 		}
 		created = true
+	} else if err != nil {
+		return InitResult{}, err
+	}
+	policyPath := DefaultPolicyPath(absRepo)
+	if _, err := os.Stat(policyPath); errors.Is(err, os.ErrNotExist) || force {
+		if err := WriteDefaultReleasePolicy(policyPath); err != nil {
+			return InitResult{}, err
+		}
 	} else if err != nil {
 		return InitResult{}, err
 	}

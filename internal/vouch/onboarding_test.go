@@ -27,10 +27,14 @@ test = { cmd = "pytest" }
 	if !contains(result.Profiles, "python") {
 		t.Fatalf("expected python profile, got %#v", result.Profiles)
 	}
-	for _, rel := range []string{".vouch/intents", ".vouch/specs", ".vouch/manifests", ".vouch/artifacts", ".vouch/build"} {
+	for _, rel := range []string{".vouch/intents", ".vouch/specs", ".vouch/policy", ".vouch/manifests", ".vouch/artifacts", ".vouch/build"} {
 		if !dirExists(filepath.Join(repo, rel)) {
 			t.Fatalf("expected directory %s", rel)
 		}
+	}
+	policy := mustLoadPolicy(t, filepath.Join(repo, ".vouch", "policy", "release-policy.json"))
+	if policy.Version != PolicySchemaVersion || len(policy.Rules) == 0 {
+		t.Fatalf("expected default release policy, got %#v", policy)
 	}
 	config := mustLoadConfig(t, filepath.Join(repo, ".vouch", "config.json"))
 	if config.Version != ConfigSchemaVersion {
@@ -353,6 +357,15 @@ func mustLoadConfig(t *testing.T, path string) Config {
 		t.Fatal(err)
 	}
 	return config
+}
+
+func mustLoadPolicy(t *testing.T, path string) ReleasePolicy {
+	t.Helper()
+	policy, err := LoadJSON[ReleasePolicy](path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return policy
 }
 
 func mustLoadSpecs(t *testing.T, repo string) map[string]Spec {

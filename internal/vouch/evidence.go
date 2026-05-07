@@ -9,6 +9,7 @@ import (
 
 type CollectEvidenceOptions struct {
 	RequireSigned bool
+	PolicyPath    string
 }
 
 func CollectEvidence(repo string, manifestPath string) (Evidence, error) {
@@ -64,7 +65,11 @@ func CollectEvidenceWithOptions(repo string, manifestPath string, opts CollectEv
 	evidence.ArtifactResults, evidence.InvalidEvidence = LinkEvidenceArtifacts(absRepo, manifest.Verification.Artifacts, obligationIndex, ArtifactLinkOptions{RequireSigned: opts.RequireSigned})
 	buildCoverage(&evidence)
 	runVerifiers(&evidence)
-	decide(&evidence)
+	policy, policyPath, err := LoadReleasePolicy(absRepo, opts.PolicyPath)
+	if err != nil {
+		return Evidence{}, err
+	}
+	ApplyReleasePolicy(&evidence, policy, policyPath)
 	return evidence, nil
 }
 
@@ -317,33 +322,6 @@ func verifyReleaseReadiness(evidence *Evidence) {
 			RequiredFix: "add rollback.strategy or rollback.compensation",
 		})
 	}
-}
-
-func decide(evidence *Evidence) {
-	evidence.Decision = "block"
-	if len(evidence.SpecErrors) > 0 || len(evidence.ManifestErrors) > 0 {
-		evidence.Reasons = append(evidence.Reasons, "invalid specs or manifest")
-	}
-	for _, finding := range evidence.Findings {
-		if finding.Blocks() {
-			evidence.Reasons = append(evidence.Reasons, finding.Claim)
-		}
-	}
-	if len(evidence.Reasons) > 0 {
-		return
-	}
-	if riskRank[evidence.Manifest.Change.Risk] >= riskRank[RiskHigh] {
-		if evidence.Manifest.Runtime.Canary.Enabled {
-			evidence.Decision = "canary"
-			evidence.Reasons = append(evidence.Reasons, "high-risk change has passing evidence and canary enabled")
-		} else {
-			evidence.Decision = "human_escalation"
-			evidence.Reasons = append(evidence.Reasons, "high-risk change passed checks but has no canary")
-		}
-		return
-	}
-	evidence.Decision = "auto_merge"
-	evidence.Reasons = append(evidence.Reasons, "low/medium risk change passed required evidence")
 }
 
 func stringSet(values []string) map[string]bool {

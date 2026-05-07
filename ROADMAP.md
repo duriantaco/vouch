@@ -61,6 +61,8 @@ Implemented today:
 - Artifact attachment with obligation inference.
 - JUnit test-map adapter for raw pytest-style JUnit evidence.
 - Machine-readable gate result artifact output for status checks.
+- Release policy files loaded from `.vouch/policy/release-policy.json`.
+- Policy simulation command with structured policy input/output.
 - Release decisions: `block`, `human_escalation`, `canary`, `auto_merge`.
 - Demo repo with blocked and passing manifests.
 - Unit tests for the current pipeline.
@@ -116,15 +118,18 @@ Separate release policy from hard-coded Go logic.
 
 Planned work:
 
-- Policy-as-code files loaded from `.vouch/policy/`.
-- Rego policy adapter or a deliberately smaller custom evaluator.
-- Compact policy input containing spec, manifest, IR coverage, findings, invalid evidence, and provenance status.
-- Policy output containing decision and reasons.
+- Rego policy adapter or a richer custom evaluator.
 - Risk-specific policy profiles.
 - Team-specific override rules.
 - Exception handling with audit trails.
-- Policy simulation command.
 - Policy regression tests.
+
+Implemented base:
+
+- Policy-as-code JSON files loaded from `.vouch/policy/`.
+- Compact policy input containing spec, manifest, IR coverage, findings, invalid evidence, and provenance status.
+- Policy output containing decision, reasons, and fired rule IDs.
+- Policy simulation command.
 
 ### Phase 3: Workflow Integration
 
@@ -222,7 +227,6 @@ The next useful contributions are:
 - Signed or hashed evidence bundle format.
 - Runner identity and allowed signer fields.
 - Hardened `gate --require-signed` production mode.
-- Policy-as-code design and simulation command.
 - Rego policy adapter decision spike.
 - Reference workflow for `init -> manifest -> pytest -> junit map -> attach -> gate`.
 - Real-world case study showing a plausible bad agent change blocked by an obligation.
@@ -242,7 +246,7 @@ Before calling this production-ready, Vouch needs:
 - Sample runner workflow with artifact upload conventions.
 - Documented evidence kinds and required fields.
 - Schema version compatibility tests.
-- Policy files instead of hard-coded release decisions.
+- Policy profile and exception semantics beyond the base JSON evaluator.
 - Auditable gate result output for GitHub Checks or similar systems.
 - Tamper-evident evidence bundles with agent/run provenance.
 - Fixture repos that cover Python flat layout, Python `src/` layout, Node, Go, Rust, and generic fallback.

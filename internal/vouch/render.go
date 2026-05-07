@@ -37,6 +37,7 @@ func GateResultFromEvidence(evidence Evidence) GateResult {
 		Version:            "vouch.gate_result.v0",
 		Decision:           evidence.Decision,
 		Reasons:            cloneStrings(evidence.Reasons),
+		PolicyPath:         evidence.PolicyPath,
 		Compilation:        evidence.Compilation,
 		SpecErrors:         cloneStrings(evidence.SpecErrors),
 		ManifestErrors:     cloneStrings(evidence.ManifestErrors),
@@ -44,8 +45,8 @@ func GateResultFromEvidence(evidence Evidence) GateResult {
 		InvalidEvidence:    cloneInvalidEvidence(evidence.InvalidEvidence),
 		MissingObligations: obligationTextMap(evidence.MissingObligations),
 		CoveredObligations: obligationTextMap(evidence.CoveredObligations),
-		PolicyRulesFired:   firedPolicyRules(evidence),
-		FiredPolicyRule:    firedPolicyRule(evidence),
+		PolicyRulesFired:   cloneStrings(evidence.PolicyResult.RulesFired),
+		FiredPolicyRule:    evidence.PolicyResult.FiredPolicyRule,
 	}
 }
 
@@ -206,38 +207,4 @@ func obligationTextMap(items map[string][]Obligation) map[string][]string {
 		}
 	}
 	return out
-}
-
-func firedPolicyRule(evidence Evidence) string {
-	rules := firedPolicyRules(evidence)
-	if len(rules) == 0 {
-		return "unknown"
-	}
-	return rules[0]
-}
-
-func firedPolicyRules(evidence Evidence) []string {
-	if evidence.Decision == "block" {
-		var rules []string
-		if len(evidence.SpecErrors) > 0 || len(evidence.ManifestErrors) > 0 {
-			rules = append(rules, "block_invalid_spec_or_manifest")
-		}
-		if len(evidence.InvalidEvidence) > 0 {
-			rules = append(rules, "block_invalid_evidence")
-		}
-		if len(evidence.MissingObligations) > 0 || len(rules) == 0 {
-			rules = append(rules, "block_missing_required_evidence")
-		}
-		return rules
-	}
-	if evidence.Decision == "human_escalation" {
-		return []string{"high_risk_without_canary"}
-	}
-	if evidence.Decision == "canary" {
-		return []string{"high_risk_canary"}
-	}
-	if evidence.Decision == "auto_merge" {
-		return []string{"low_medium_auto_merge"}
-	}
-	return []string{"unknown"}
 }

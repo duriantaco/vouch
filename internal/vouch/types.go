@@ -3,14 +3,18 @@ package vouch
 type Risk string
 
 const (
-	SpecSchemaVersion     = "vouch.spec.v0"
-	ManifestSchemaVersion = "vouch.manifest.v0"
-	EvidenceSchemaVersion = "vouch.evidence.v0"
-	ASTSchemaVersion      = "vouch.ast.v0"
-	IRSchemaVersion       = "vouch.ir.v0"
-	PlanSchemaVersion     = "vouch.plan.v0"
-	ConfigSchemaVersion   = "vouch.config.v0"
-	TestMapSchemaVersion  = "vouch.test_map.v0"
+	SpecSchemaVersion       = "vouch.spec.v0"
+	ManifestSchemaVersion   = "vouch.manifest.v0"
+	EvidenceSchemaVersion   = "vouch.evidence.v0"
+	ASTSchemaVersion        = "vouch.ast.v0"
+	IRSchemaVersion         = "vouch.ir.v0"
+	PlanSchemaVersion       = "vouch.plan.v0"
+	ConfigSchemaVersion     = "vouch.config.v0"
+	TestMapSchemaVersion    = "vouch.test_map.v0"
+	PolicySchemaVersion     = "vouch.policy.v0"
+	PolicyInputVersion      = "vouch.policy_input.v0"
+	PolicyResultVersion     = "vouch.policy_result.v0"
+	PolicySimulationVersion = "vouch.policy_simulation.v0"
 )
 
 const (
@@ -269,6 +273,69 @@ func (f Finding) Blocks() bool {
 	return f.Decision == "block"
 }
 
+type ReleasePolicy struct {
+	Version string       `json:"version"`
+	Rules   []PolicyRule `json:"rules"`
+}
+
+type PolicyRule struct {
+	ID           string          `json:"id"`
+	Description  string          `json:"description,omitempty"`
+	When         PolicyCondition `json:"when"`
+	Decision     string          `json:"decision"`
+	Reasons      []string        `json:"reasons,omitempty"`
+	ReasonSource string          `json:"reason_source,omitempty"`
+	Stop         bool            `json:"stop,omitempty"`
+}
+
+type PolicyCondition struct {
+	Fact        string            `json:"fact,omitempty"`
+	RiskAtLeast Risk              `json:"risk_at_least,omitempty"`
+	RiskBelow   Risk              `json:"risk_below,omitempty"`
+	All         []PolicyCondition `json:"all,omitempty"`
+	Any         []PolicyCondition `json:"any,omitempty"`
+	Not         *PolicyCondition  `json:"not,omitempty"`
+}
+
+type PolicyInput struct {
+	Version                  string              `json:"version"`
+	Manifest                 Manifest            `json:"manifest"`
+	Compilation              CompilationStats    `json:"compilation"`
+	Risk                     Risk                `json:"risk"`
+	RiskRank                 int                 `json:"risk_rank"`
+	CanaryEnabled            bool                `json:"canary_enabled"`
+	SignedEvidenceRequired   bool                `json:"signed_evidence_required"`
+	SpecErrors               []string            `json:"spec_errors"`
+	ManifestErrors           []string            `json:"manifest_errors"`
+	ArtifactResults          []ArtifactResult    `json:"artifact_results"`
+	InvalidEvidence          []InvalidEvidence   `json:"invalid_evidence"`
+	MissingObligations       map[string][]string `json:"missing_obligations"`
+	CoveredObligations       map[string][]string `json:"covered_obligations"`
+	Findings                 []Finding           `json:"findings"`
+	BlockingFindings         []Finding           `json:"blocking_findings"`
+	BlockingFindingClaims    []string            `json:"blocking_finding_claims"`
+	HasInvalidSpecOrManifest bool                `json:"has_invalid_spec_or_manifest"`
+	HasInvalidEvidence       bool                `json:"has_invalid_evidence"`
+	HasMissingObligations    bool                `json:"has_missing_obligations"`
+	HasBlockingFindings      bool                `json:"has_blocking_findings"`
+}
+
+type PolicyResult struct {
+	Version         string   `json:"version"`
+	PolicyPath      string   `json:"policy_path"`
+	Decision        string   `json:"decision"`
+	Reasons         []string `json:"reasons"`
+	RulesFired      []string `json:"rules_fired"`
+	FiredPolicyRule string   `json:"fired_policy_rule"`
+}
+
+type PolicySimulation struct {
+	Version    string       `json:"version"`
+	PolicyPath string       `json:"policy_path"`
+	Input      PolicyInput  `json:"input"`
+	Result     PolicyResult `json:"result"`
+}
+
 type Evidence struct {
 	Version                string                      `json:"version"`
 	Repo                   string                      `json:"repo"`
@@ -280,6 +347,8 @@ type Evidence struct {
 	VerificationPlans      map[string]VerificationPlan `json:"verification_plans"`
 	Diagnostics            []Diagnostic                `json:"diagnostics"`
 	SignedEvidenceRequired bool                        `json:"signed_evidence_required"`
+	PolicyPath             string                      `json:"policy_path"`
+	PolicyResult           PolicyResult                `json:"policy_result"`
 	SpecErrors             []string                    `json:"spec_errors"`
 	ManifestErrors         []string                    `json:"manifest_errors"`
 	ArtifactResults        []ArtifactResult            `json:"artifact_results"`
@@ -328,6 +397,7 @@ type GateResult struct {
 	Version            string              `json:"version"`
 	Decision           string              `json:"decision"`
 	Reasons            []string            `json:"reasons"`
+	PolicyPath         string              `json:"policy_path"`
 	Compilation        CompilationStats    `json:"compilation"`
 	SpecErrors         []string            `json:"spec_errors"`
 	ManifestErrors     []string            `json:"manifest_errors"`
