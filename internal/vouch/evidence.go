@@ -7,7 +7,15 @@ import (
 	"strings"
 )
 
+type CollectEvidenceOptions struct {
+	RequireSigned bool
+}
+
 func CollectEvidence(repo string, manifestPath string) (Evidence, error) {
+	return CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{})
+}
+
+func CollectEvidenceWithOptions(repo string, manifestPath string, opts CollectEvidenceOptions) (Evidence, error) {
 	absRepo, err := filepath.Abs(repo)
 	if err != nil {
 		return Evidence{}, err
@@ -26,33 +34,34 @@ func CollectEvidence(repo string, manifestPath string) (Evidence, error) {
 	}
 	pipeline := CompileManifestPipeline(specs, manifest)
 	evidence := Evidence{
-		Version:             EvidenceSchemaVersion,
-		Repo:                absRepo,
-		ManifestPath:        absManifest,
-		Compilation:         pipeline.Compilation,
-		Manifest:            manifest,
-		Specs:               specs,
-		IRs:                 pipeline.IRs,
-		VerificationPlans:   pipeline.VerificationPlans,
-		Diagnostics:         pipeline.Diagnostics,
-		SpecErrors:          pipeline.SpecErrors,
-		ManifestErrors:      pipeline.ManifestErrors,
-		ArtifactResults:     []ArtifactResult{},
-		InvalidEvidence:     []InvalidEvidence{},
-		RequiredObligations: make(map[string][]Obligation),
-		CoveredObligations:  make(map[string][]Obligation),
-		MissingObligations:  make(map[string][]Obligation),
-		RequiredTests:       make(map[string][]string),
-		CoveredTests:        make(map[string][]string),
-		MissingTests:        make(map[string][]string),
-		RequiredSecurity:    make(map[string][]string),
-		CoveredSecurity:     make(map[string][]string),
-		MissingSecurity:     make(map[string][]string),
-		Findings:            []Finding{},
-		Reasons:             []string{},
+		Version:                EvidenceSchemaVersion,
+		Repo:                   absRepo,
+		ManifestPath:           absManifest,
+		Compilation:            pipeline.Compilation,
+		Manifest:               manifest,
+		Specs:                  specs,
+		IRs:                    pipeline.IRs,
+		VerificationPlans:      pipeline.VerificationPlans,
+		Diagnostics:            pipeline.Diagnostics,
+		SignedEvidenceRequired: opts.RequireSigned,
+		SpecErrors:             pipeline.SpecErrors,
+		ManifestErrors:         pipeline.ManifestErrors,
+		ArtifactResults:        []ArtifactResult{},
+		InvalidEvidence:        []InvalidEvidence{},
+		RequiredObligations:    make(map[string][]Obligation),
+		CoveredObligations:     make(map[string][]Obligation),
+		MissingObligations:     make(map[string][]Obligation),
+		RequiredTests:          make(map[string][]string),
+		CoveredTests:           make(map[string][]string),
+		MissingTests:           make(map[string][]string),
+		RequiredSecurity:       make(map[string][]string),
+		CoveredSecurity:        make(map[string][]string),
+		MissingSecurity:        make(map[string][]string),
+		Findings:               []Finding{},
+		Reasons:                []string{},
 	}
 	obligationIndex := NewObligationIndex(evidence.VerificationPlans)
-	evidence.ArtifactResults, evidence.InvalidEvidence = LinkEvidenceArtifacts(absRepo, manifest.Verification.Artifacts, obligationIndex)
+	evidence.ArtifactResults, evidence.InvalidEvidence = LinkEvidenceArtifacts(absRepo, manifest.Verification.Artifacts, obligationIndex, ArtifactLinkOptions{RequireSigned: opts.RequireSigned})
 	buildCoverage(&evidence)
 	runVerifiers(&evidence)
 	decide(&evidence)
@@ -161,6 +170,16 @@ func verifyCompilation(evidence *Evidence) {
 }
 
 func verifyArtifactEvidence(evidence *Evidence) {
+	if evidence.SignedEvidenceRequired && evidence.Compilation.ObligationsBuilt > 0 && len(evidence.Manifest.Verification.Artifacts) == 0 {
+		evidence.Findings = append(evidence.Findings, Finding{
+			Verifier:    "evidence_linker",
+			Severity:    "high",
+			Decision:    "block",
+			Claim:       "signed evidence artifacts are required",
+			Evidence:    "gate --require-signed was used and verification.artifacts is empty",
+			RequiredFix: "attach cosign-signed evidence artifacts for compiled obligations",
+		})
+	}
 	if evidence.Compilation.ObligationsBuilt > 0 && len(evidence.Manifest.Verification.Artifacts) == 0 && riskRank[evidence.Manifest.Change.Risk] >= riskRank[RiskMedium] {
 		evidence.Findings = append(evidence.Findings, Finding{
 			Verifier:    "evidence_linker",

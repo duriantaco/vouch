@@ -82,11 +82,11 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 			return junitMap(absRepo, rest[2:], common.json, stdout, stderr, manifest)
 		}
 	case "verify":
-		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "evidence")
+		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "evidence", rest[1:])
 	case "gate":
-		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "gate")
+		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "gate", rest[1:])
 	case "evidence":
-		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "evidence-no-exit")
+		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "evidence-no-exit", rest[1:])
 	}
 	usage(stderr)
 	return 2
@@ -269,6 +269,9 @@ func manifestAttachArtifact(repo string, args []string, jsonOut bool, stdout io.
 	producer := flags.String("producer", "", "artifact producer")
 	command := flags.String("command", "", "command that produced artifact")
 	sha256 := flags.String("sha256", "", "expected sha256")
+	signatureBundle := flags.String("signature-bundle", "", "cosign signature bundle path")
+	signerIdentity := flags.String("signer-identity", "", "expected cosign signer identity")
+	signerOIDCIssuer := flags.String("signer-oidc-issuer", "", "expected cosign signer OIDC issuer")
 	outPath := flags.String("out", "", "updated manifest output path")
 	exitCode := flags.Int("exit-code", -1, "artifact command exit code")
 	if err := flags.Parse(args); err != nil {
@@ -282,16 +285,19 @@ func manifestAttachArtifact(repo string, args []string, jsonOut bool, stdout io.
 		return 2
 	}
 	manifest, artifact, err := AttachArtifact(repo, AttachArtifactOptions{
-		ManifestPath: *manifestPath,
-		ID:           *id,
-		Kind:         EvidenceKind(*kind),
-		Path:         *path,
-		TestMapPath:  *testMap,
-		Producer:     *producer,
-		Command:      *command,
-		ExitCode:     *exitCode,
-		SHA256:       *sha256,
-		Out:          *outPath,
+		ManifestPath:     *manifestPath,
+		ID:               *id,
+		Kind:             EvidenceKind(*kind),
+		Path:             *path,
+		TestMapPath:      *testMap,
+		Producer:         *producer,
+		Command:          *command,
+		ExitCode:         *exitCode,
+		SHA256:           *sha256,
+		SignatureBundle:  *signatureBundle,
+		SignerIdentity:   *signerIdentity,
+		SignerOIDCIssuer: *signerOIDCIssuer,
+		Out:              *outPath,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -546,11 +552,32 @@ func manifestCheck(repo string, manifestPath string, stdout io.Writer, stderr io
 	return 0
 }
 
-func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.Writer, stderr io.Writer, mode string) int {
-	evidence, err := CollectEvidence(repo, manifestPath)
+func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.Writer, stderr io.Writer, mode string, args []string) int {
+	flags := flag.NewFlagSet(mode, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	gateOut := ""
+	requireSigned := false
+	if mode == "gate" {
+		flags.StringVar(&gateOut, "out", "", "path to write compact gate result JSON")
+		flags.BoolVar(&requireSigned, "require-signed", false, "require cosign-verified evidence artifacts")
+	}
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(stderr, "%s: unexpected argument %q\n", mode, flags.Arg(0))
+		return 2
+	}
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: requireSigned})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	if gateOut != "" {
+		if err := writeJSONFile(resolveRepoOutput(repo, gateOut), GateResultFromEvidence(evidence)); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	if jsonOut {
 		var output string
@@ -597,9 +624,9 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  spec lint")
 	fmt.Fprintln(out, "  manifest check")
 	fmt.Fprintln(out, "  manifest create --task-id ID --summary TEXT --agent NAME --run-id ID --out FILE")
-	fmt.Fprintln(out, "  manifest attach-artifact --manifest FILE --id ID --kind KIND --path FILE --exit-code N --out FILE")
+	fmt.Fprintln(out, "  manifest attach-artifact --manifest FILE --id ID --kind KIND --path FILE --exit-code N [--signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE")
 	fmt.Fprintln(out, "  junit map --manifest FILE --junit FILE --test-map FILE --out FILE")
 	fmt.Fprintln(out, "  verify")
-	fmt.Fprintln(out, "  gate")
+	fmt.Fprintln(out, "  gate [--out FILE] [--require-signed]")
 	fmt.Fprintln(out, "  evidence")
 }

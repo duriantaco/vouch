@@ -47,7 +47,7 @@ The mental model:
 | Contract | `.vouch/intents/*.yaml` and `.vouch/specs/*.json` | Human-owned intent for one part of the repo. |
 | Manifest | `.vouch/manifests/*.json` | What the agent changed in one run. |
 | Evidence | `.vouch/artifacts/*` | Test/probe/scanner output that covers compiled obligation IDs. |
-| Gate result | command output | Vouch's decision for that manifest. |
+| Gate result | command output or `.vouch/build/gate-result.json` | Vouch's decision for that manifest. |
 
 ### 1. Initialize Vouch In Your Repo
 
@@ -208,6 +208,38 @@ vouch --repo /path/to/your/repo manifest attach-artifact \
   --out .vouch/manifests/run-123.json
 ```
 
+Signature fields are optional in beta. To attach signed evidence, first sign the
+artifact with cosign, then include the bundle and expected identity when
+attaching it:
+
+```sh
+cosign sign-blob .vouch/artifacts/behavior.json \
+  --bundle .vouch/artifacts/behavior.sigstore.json
+
+vouch --repo /path/to/your/repo manifest attach-artifact \
+  --manifest .vouch/manifests/run-123.json \
+  --id behavior \
+  --kind behavior_trace \
+  --path .vouch/artifacts/behavior.json \
+  --signature-bundle .vouch/artifacts/behavior.sigstore.json \
+  --signer-identity "https://github.com/ORG/REPO/.github/workflows/vouch.yml@refs/heads/main" \
+  --signer-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --exit-code 0 \
+  --out .vouch/manifests/run-123.json
+```
+
+Production-style gates should require signed evidence:
+
+```sh
+vouch --repo /path/to/your/repo \
+  --manifest .vouch/manifests/run-123.json \
+  gate --require-signed
+```
+
+`--require-signed` verifies each evidence artifact with `cosign verify-blob`
+using the artifact's `signature_bundle`, `signer_identity`, and
+`signer_oidc_issuer` fields.
+
 ### 7. Gate The Change
 
 ```sh
@@ -231,9 +263,18 @@ vouch --repo /path/to/your/repo \
   gate --json
 ```
 
+To preserve a compact gate result artifact for CI upload or required-status checks:
+
+```sh
+vouch --repo /path/to/your/repo \
+  --manifest .vouch/manifests/run-123.json \
+  gate --out .vouch/build/gate-result.json
+```
+
 ## Project Docs
 
 - [Roadmap](ROADMAP.md) explains where the project is going and what remains before this can be production infrastructure.
+- [Comparison](COMPARISON.md) explains how Vouch composes with Sigstore, SLSA, in-toto, OPA, and Conftest.
 - [Contributing](CONTRIBUTING.md) explains how to help and which areas need work.
 
 The problem it attempts to solve is:
@@ -266,19 +307,21 @@ Today, Vouch can check:
 - Artifact paths stay inside the repo and files exist.
 - Artifact exit codes are present and zero.
 - Optional artifact SHA-256 values match file contents.
+- Optional `gate --require-signed` mode verifies evidence artifacts with cosign bundles and expected signer identities.
 - JUnit evidence has no failure/error/skipped testcases and covers required test obligations.
 - Raw pytest/JUnit testcases can be mapped through `.vouch/test-map.json`.
 - Generic JSON/text artifacts contain exact obligation IDs and optional passing status.
+- Compact gate results can be written to a JSON artifact file.
 - Release decisions follow deterministic risk and evidence rules.
 
 Today, Vouch cannot check:
 
 - Whether arbitrary code semantically implements the declared behavior.
 - Whether a generic JSON/text artifact is truthful beyond its structure, IDs, status, path, exit code, and optional hash.
-- Whether tests were actually run unless the external runner preserves the artifact and manifest chain.
+- Whether tests were actually run unless the external runner preserves and signs the artifact chain.
 - Whether product intent was inferred correctly from code.
 - Whether release policy is team-defined; policy is still hard-coded Go logic.
-- Whether evidence is signed, provenance-bound, or tamper-evident.
+- Whether signed evidence is bound to a canonical bundle that includes manifest identity, artifact hashes, and covered obligation IDs.
 
 ## Validation Status
 
@@ -556,14 +599,14 @@ vouch artifacts build --spec FILE --out DIR
 vouch --repo DIR spec lint
 vouch --repo DIR --manifest FILE manifest check
 vouch --repo DIR manifest create --task-id ID --summary TEXT --agent NAME --run-id ID --out FILE
-vouch --repo DIR --manifest FILE manifest attach-artifact --id ID --kind KIND --path FILE --exit-code N --out FILE
+vouch --repo DIR --manifest FILE manifest attach-artifact --id ID --kind KIND --path FILE --exit-code N [--signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE
 vouch --repo DIR --manifest FILE junit map --junit FILE --test-map FILE --out FILE
 vouch --repo DIR --manifest FILE verify
-vouch --repo DIR --manifest FILE gate
+vouch --repo DIR --manifest FILE gate [--out FILE] [--require-signed]
 vouch --repo DIR --manifest FILE evidence
 ```
 
-`--json` emits machine-readable evidence for commands that collect evidence.
+`--json` emits machine-readable evidence for commands that collect evidence. For `gate`, `--json` emits the compact gate result to stdout and `--out FILE` writes the same gate-result shape as a JSON artifact.
 
 ## Test
 

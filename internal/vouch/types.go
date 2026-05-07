@@ -222,14 +222,17 @@ type Verification struct {
 }
 
 type EvidenceArtifact struct {
-	ID          string       `json:"id"`
-	Kind        EvidenceKind `json:"kind"`
-	Producer    string       `json:"producer,omitempty"`
-	Command     string       `json:"command,omitempty"`
-	Path        string       `json:"path,omitempty"`
-	SHA256      string       `json:"sha256,omitempty"`
-	ExitCode    *int         `json:"exit_code"`
-	Obligations []string     `json:"obligations"`
+	ID               string       `json:"id"`
+	Kind             EvidenceKind `json:"kind"`
+	Producer         string       `json:"producer,omitempty"`
+	Command          string       `json:"command,omitempty"`
+	Path             string       `json:"path,omitempty"`
+	SHA256           string       `json:"sha256,omitempty"`
+	SignatureBundle  string       `json:"signature_bundle,omitempty"`
+	SignerIdentity   string       `json:"signer_identity,omitempty"`
+	SignerOIDCIssuer string       `json:"signer_oidc_issuer,omitempty"`
+	ExitCode         *int         `json:"exit_code"`
+	Obligations      []string     `json:"obligations"`
 }
 
 type TestResults struct {
@@ -267,31 +270,32 @@ func (f Finding) Blocks() bool {
 }
 
 type Evidence struct {
-	Version             string                      `json:"version"`
-	Repo                string                      `json:"repo"`
-	ManifestPath        string                      `json:"manifest_path"`
-	Compilation         CompilationStats            `json:"compilation"`
-	Manifest            Manifest                    `json:"manifest"`
-	Specs               map[string]Spec             `json:"specs"`
-	IRs                 map[string]IR               `json:"irs"`
-	VerificationPlans   map[string]VerificationPlan `json:"verification_plans"`
-	Diagnostics         []Diagnostic                `json:"diagnostics"`
-	SpecErrors          []string                    `json:"spec_errors"`
-	ManifestErrors      []string                    `json:"manifest_errors"`
-	ArtifactResults     []ArtifactResult            `json:"artifact_results"`
-	InvalidEvidence     []InvalidEvidence           `json:"invalid_evidence"`
-	RequiredObligations map[string][]Obligation     `json:"required_obligations"`
-	CoveredObligations  map[string][]Obligation     `json:"covered_obligations"`
-	MissingObligations  map[string][]Obligation     `json:"missing_obligations"`
-	RequiredTests       map[string][]string         `json:"required_tests"`
-	CoveredTests        map[string][]string         `json:"covered_tests"`
-	MissingTests        map[string][]string         `json:"missing_tests"`
-	RequiredSecurity    map[string][]string         `json:"required_security"`
-	CoveredSecurity     map[string][]string         `json:"covered_security"`
-	MissingSecurity     map[string][]string         `json:"missing_security"`
-	Findings            []Finding                   `json:"findings"`
-	Decision            string                      `json:"decision"`
-	Reasons             []string                    `json:"reasons"`
+	Version                string                      `json:"version"`
+	Repo                   string                      `json:"repo"`
+	ManifestPath           string                      `json:"manifest_path"`
+	Compilation            CompilationStats            `json:"compilation"`
+	Manifest               Manifest                    `json:"manifest"`
+	Specs                  map[string]Spec             `json:"specs"`
+	IRs                    map[string]IR               `json:"irs"`
+	VerificationPlans      map[string]VerificationPlan `json:"verification_plans"`
+	Diagnostics            []Diagnostic                `json:"diagnostics"`
+	SignedEvidenceRequired bool                        `json:"signed_evidence_required"`
+	SpecErrors             []string                    `json:"spec_errors"`
+	ManifestErrors         []string                    `json:"manifest_errors"`
+	ArtifactResults        []ArtifactResult            `json:"artifact_results"`
+	InvalidEvidence        []InvalidEvidence           `json:"invalid_evidence"`
+	RequiredObligations    map[string][]Obligation     `json:"required_obligations"`
+	CoveredObligations     map[string][]Obligation     `json:"covered_obligations"`
+	MissingObligations     map[string][]Obligation     `json:"missing_obligations"`
+	RequiredTests          map[string][]string         `json:"required_tests"`
+	CoveredTests           map[string][]string         `json:"covered_tests"`
+	MissingTests           map[string][]string         `json:"missing_tests"`
+	RequiredSecurity       map[string][]string         `json:"required_security"`
+	CoveredSecurity        map[string][]string         `json:"covered_security"`
+	MissingSecurity        map[string][]string         `json:"missing_security"`
+	Findings               []Finding                   `json:"findings"`
+	Decision               string                      `json:"decision"`
+	Reasons                []string                    `json:"reasons"`
 }
 
 type CompilationStats struct {
@@ -308,6 +312,7 @@ type ArtifactResult struct {
 	ResolvedPath       string       `json:"resolved_path,omitempty"`
 	Status             string       `json:"status"`
 	HashVerified       bool         `json:"hash_verified"`
+	SignatureVerified  bool         `json:"signature_verified"`
 	CoveredObligations []string     `json:"covered_obligations"`
 	FailedTests        []string     `json:"failed_tests,omitempty"`
 	Issues             []string     `json:"issues,omitempty"`

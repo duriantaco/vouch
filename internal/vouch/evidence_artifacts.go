@@ -7,12 +7,17 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 type ObligationIndex struct {
 	ByID map[string]Obligation
+}
+
+type ArtifactLinkOptions struct {
+	RequireSigned bool
 }
 
 func NewObligationIndex(plans map[string]VerificationPlan) ObligationIndex {
@@ -25,7 +30,7 @@ func NewObligationIndex(plans map[string]VerificationPlan) ObligationIndex {
 	return index
 }
 
-func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index ObligationIndex) ([]ArtifactResult, []InvalidEvidence) {
+func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index ObligationIndex, opts ArtifactLinkOptions) ([]ArtifactResult, []InvalidEvidence) {
 	results := make([]ArtifactResult, 0, len(artifacts))
 	var invalid []InvalidEvidence
 	for _, artifact := range artifacts {
@@ -79,6 +84,10 @@ func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index Obli
 			result.addIssue("artifact_path_required", fmt.Sprintf("%s evidence requires an artifact path", artifact.Kind))
 		}
 
+		if opts.RequireSigned && len(data) > 0 {
+			verifyCosignBundle(repo, artifact, result.ResolvedPath, &result)
+		}
+
 		if artifact.Kind == EvidenceTestCoverage {
 			if len(data) > 0 {
 				covered, failed, issues := importJUnitEvidence(data, artifact.Obligations)
@@ -113,6 +122,52 @@ func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index Obli
 		results = append(results, result)
 	}
 	return results, invalid
+}
+
+func verifyCosignBundle(repo string, artifact EvidenceArtifact, artifactPath string, result *ArtifactResult) {
+	if artifact.SignatureBundle == "" {
+		result.addIssue("missing_signature_bundle", "signature_bundle is required when signed evidence is enforced")
+		return
+	}
+	if artifact.SignerIdentity == "" {
+		result.addIssue("missing_signer_identity", "signer_identity is required when signed evidence is enforced")
+		return
+	}
+	if artifact.SignerOIDCIssuer == "" {
+		result.addIssue("missing_signer_oidc_issuer", "signer_oidc_issuer is required when signed evidence is enforced")
+		return
+	}
+	bundlePath, err := resolveArtifactPath(repo, artifact.SignatureBundle)
+	if err != nil {
+		result.addIssue("signature_bundle_path_escape", err.Error())
+		return
+	}
+	if _, err := os.Stat(bundlePath); err != nil {
+		result.addIssue("signature_bundle_missing", fmt.Sprintf("cannot read signature bundle %s: %v", artifact.SignatureBundle, err))
+		return
+	}
+	cosignPath, err := exec.LookPath("cosign")
+	if err != nil {
+		result.addIssue("cosign_missing", "cosign is required to verify signed evidence")
+		return
+	}
+	cmd := exec.Command(cosignPath,
+		"verify-blob",
+		artifactPath,
+		"--bundle", bundlePath,
+		"--certificate-identity="+artifact.SignerIdentity,
+		"--certificate-oidc-issuer="+artifact.SignerOIDCIssuer,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		result.addIssue("signature_verify", message)
+		return
+	}
+	result.SignatureVerified = true
 }
 
 func (r *ArtifactResult) addIssue(code string, message string) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1338,6 +1339,194 @@ func TestGateResultJSONIsCompactAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestGateCommandWritesGateResultFile(t *testing.T) {
+	repo, manifestPath := writeScenario(t, Spec{
+		Version:    SpecSchemaVersion,
+		ID:         "ui.copy",
+		Owner:      "product",
+		OwnedPaths: []string{"src/ui/**"},
+		Risk:       RiskLow,
+		Behavior:   []string{"button label changes to Save"},
+		Security:   []string{"no secrets introduced"},
+		Tests:      SpecTests{Required: []string{"button label renders"}},
+		Runtime:    SpecRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback:   SpecRollback{Strategy: "revert_commit"},
+	}, Manifest{
+		Version: ManifestSchemaVersion,
+		Task:    Task{ID: "issue-gate-out", Summary: "copy update"},
+		Change: Change{
+			Risk:            RiskLow,
+			SpecsTouched:    []string{"ui.copy"},
+			BehaviorChanged: true,
+			ChangedFiles:    []string{"src/ui/copy.ts"},
+		},
+		Verification: Verification{
+			CoversBehavior: []string{"button label changes to Save"},
+			Commands:       []string{"go test ./..."},
+			CoversTests:    []string{"button label renders"},
+			CoversSecurity: []string{"no secrets introduced"},
+			TestResults:    TestResults{Passed: 1},
+		},
+		Runtime:  ManifestRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback: ManifestRollback{Strategy: "revert_commit"},
+	})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"--repo", repo, "--manifest", manifestPath, "gate", "--out", ".vouch/build/gate-result.json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("gate failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Release decision: auto_merge") {
+		t.Fatalf("expected human gate output, got %s", stdout.String())
+	}
+	result, err := LoadJSON[GateResult](filepath.Join(repo, ".vouch", "build", "gate-result.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version != "vouch.gate_result.v0" || result.Decision != "auto_merge" {
+		t.Fatalf("unexpected gate result: %#v", result)
+	}
+}
+
+func TestRequireSignedBlocksUnsignedArtifacts(t *testing.T) {
+	root := repoRoot(t)
+	demo := filepath.Join(root, "demo_repo")
+	evidence, err := CollectEvidenceWithOptions(demo, filepath.Join(demo, ".vouch", "manifests", "pass.json"), CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected signed-evidence gate to block unsigned artifacts, got %s", evidence.Decision)
+	}
+	if !hasInvalidEvidence(evidence, "behavior-trace", "missing_signature_bundle") {
+		t.Fatalf("expected unsigned behavior artifact to be invalid: %#v", evidence.InvalidEvidence)
+	}
+}
+
+func TestRequireSignedRequiresArtifactBackedEvidence(t *testing.T) {
+	repo, manifestPath := writeScenario(t, Spec{
+		Version:    SpecSchemaVersion,
+		ID:         "ui.copy",
+		Owner:      "product",
+		OwnedPaths: []string{"src/ui/**"},
+		Risk:       RiskLow,
+		Behavior:   []string{"button label changes to Save"},
+		Security:   []string{"no secrets introduced"},
+		Tests:      SpecTests{Required: []string{"button label renders"}},
+		Runtime:    SpecRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback:   SpecRollback{Strategy: "revert_commit"},
+	}, Manifest{
+		Version: ManifestSchemaVersion,
+		Task:    Task{ID: "issue-signed-text", Summary: "text evidence"},
+		Change: Change{
+			Risk:            RiskLow,
+			SpecsTouched:    []string{"ui.copy"},
+			BehaviorChanged: true,
+			ChangedFiles:    []string{"src/ui/copy.ts"},
+		},
+		Verification: Verification{
+			CoversBehavior: []string{"button label changes to Save"},
+			Commands:       []string{"go test ./..."},
+			CoversTests:    []string{"button label renders"},
+			CoversSecurity: []string{"no secrets introduced"},
+			TestResults:    TestResults{Passed: 1},
+		},
+		Runtime:  ManifestRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback: ManifestRollback{Strategy: "revert_commit"},
+	})
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected require-signed to block text-only evidence, got %s", evidence.Decision)
+	}
+	if !hasFinding(evidence, "evidence_linker", "signed evidence artifacts are required") {
+		t.Fatalf("expected signed artifact finding: %#v", evidence.Findings)
+	}
+}
+
+func TestRequireSignedAcceptsCosignVerifiedArtifacts(t *testing.T) {
+	installFakeCosign(t, 0)
+	spec := Spec{
+		Version:    SpecSchemaVersion,
+		ID:         "ui.copy",
+		Owner:      "product",
+		OwnedPaths: []string{"src/ui/**"},
+		Risk:       RiskLow,
+		Behavior:   []string{"button label changes to Save"},
+		Security:   []string{"no secrets introduced"},
+		Tests:      SpecTests{Required: []string{"button label renders"}},
+		Runtime:    SpecRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback:   SpecRollback{Strategy: "revert_commit"},
+	}
+	behaviorID := obligationID(t, spec, ObligationBehavior, "button label changes to Save")
+	securityID := obligationID(t, spec, ObligationSecurity, "no secrets introduced")
+	testID := obligationID(t, spec, ObligationRequiredTest, "button label renders")
+	runtimeID := obligationID(t, spec, ObligationRuntimeSignal, "ui.rendered")
+	rollbackID := obligationID(t, spec, ObligationRollback, "revert_commit")
+	signed := func(id string, kind EvidenceKind, path string, obligations ...string) EvidenceArtifact {
+		return EvidenceArtifact{
+			ID:               id,
+			Kind:             kind,
+			Producer:         "ci",
+			Path:             path,
+			SignatureBundle:  "artifacts/" + id + ".sigstore.json",
+			SignerIdentity:   "https://github.com/example/repo/.github/workflows/vouch.yml@refs/heads/main",
+			SignerOIDCIssuer: "https://token.actions.githubusercontent.com",
+			ExitCode:         exitCode(0),
+			Obligations:      obligations,
+		}
+	}
+	repo, manifestPath := writeScenario(t, spec, Manifest{
+		Version: ManifestSchemaVersion,
+		Task:    Task{ID: "issue-signed", Summary: "signed evidence"},
+		Change: Change{
+			Risk:            RiskLow,
+			SpecsTouched:    []string{"ui.copy"},
+			BehaviorChanged: true,
+			ChangedFiles:    []string{"src/ui/copy.ts"},
+		},
+		Verification: Verification{
+			Commands:    []string{"go test ./..."},
+			TestResults: TestResults{Passed: 1},
+			Artifacts: []EvidenceArtifact{
+				signed("behavior", EvidenceBehaviorTrace, "artifacts/behavior.json", behaviorID),
+				signed("security", EvidenceSecurityCheck, "artifacts/security.json", securityID),
+				signed("tests", EvidenceTestCoverage, "artifacts/junit.xml", testID),
+				signed("runtime", EvidenceRuntimeMetric, "artifacts/runtime.json", runtimeID),
+				signed("rollback", EvidenceRollbackPlan, "artifacts/rollback.json", rollbackID),
+			},
+		},
+		Runtime:  ManifestRuntime{Metrics: []string{"ui.rendered"}},
+		Rollback: ManifestRollback{Strategy: "revert_commit"},
+	})
+	writeArtifact(t, repo, "artifacts/behavior.json", `{"status":"pass","obligations":["`+behaviorID+`"]}`)
+	writeArtifact(t, repo, "artifacts/security.json", `{"status":"pass","obligations":["`+securityID+`"]}`)
+	writeArtifact(t, repo, "artifacts/runtime.json", `{"status":"pass","obligations":["`+runtimeID+`"]}`)
+	writeArtifact(t, repo, "artifacts/rollback.json", `{"status":"pass","obligations":["`+rollbackID+`"]}`)
+	writeArtifact(t, repo, "artifacts/junit.xml", `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ui.copy" tests="1" failures="0" errors="0" skipped="0">
+  <testcase classname="`+testID+`" name="button label renders" />
+</testsuite>
+`)
+	for _, artifact := range []string{"behavior", "security", "tests", "runtime", "rollback"} {
+		writeArtifact(t, repo, "artifacts/"+artifact+".sigstore.json", `{"mediaType":"application/vnd.dev.sigstore.bundle+json"}`)
+	}
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "auto_merge" {
+		t.Fatalf("expected signed artifacts to pass, got %s: invalid=%#v findings=%#v", evidence.Decision, evidence.InvalidEvidence, evidence.Findings)
+	}
+	for _, result := range evidence.ArtifactResults {
+		if !result.SignatureVerified {
+			t.Fatalf("expected signature verification for artifact %s: %#v", result.ID, evidence.ArtifactResults)
+		}
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -1494,6 +1683,17 @@ func writeArtifact(t *testing.T, repo string, relPath string, data string) {
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func installFakeCosign(t *testing.T, exitCode int) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cosign")
+	script := "#!/bin/sh\nexit " + strconv.Itoa(exitCode) + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func obligationID(t *testing.T, spec Spec, kind ObligationKind, text string) string {
