@@ -85,7 +85,7 @@ func buildCoverage(evidence *Evidence) {
 	securityCoverage := stringSet(evidence.Manifest.Verification.CoversSecurity)
 	runtimeCoverage := stringSet(evidence.Manifest.Runtime.Metrics)
 	artifactCoverage := artifactCoverageByKind(evidence.ArtifactResults)
-	useArtifacts := len(evidence.Manifest.Verification.Artifacts) > 0
+	useArtifacts := len(evidence.Manifest.Verification.Artifacts) > 0 || len(evidence.ArtifactResults) > 0
 	for _, specID := range evidence.Manifest.Change.SpecsTouched {
 		plan, ok := evidence.VerificationPlans[specID]
 		if !ok {
@@ -194,7 +194,8 @@ func verifyCompilation(evidence *Evidence) {
 }
 
 func verifyArtifactEvidence(evidence *Evidence) {
-	if evidence.SignedEvidenceRequired && evidence.Compilation.ObligationsBuilt > 0 && len(evidence.Manifest.Verification.Artifacts) == 0 {
+	hasLinkedArtifacts := len(evidence.Manifest.Verification.Artifacts) > 0 || len(evidence.ArtifactResults) > 0
+	if evidence.SignedEvidenceRequired && evidence.Compilation.ObligationsBuilt > 0 && !hasLinkedArtifacts {
 		evidence.Findings = append(evidence.Findings, Finding{
 			Verifier:    "evidence_linker",
 			Severity:    "high",
@@ -204,7 +205,7 @@ func verifyArtifactEvidence(evidence *Evidence) {
 			RequiredFix: "attach cosign-signed evidence artifacts for compiled obligations",
 		})
 	}
-	if evidence.Compilation.ObligationsBuilt > 0 && len(evidence.Manifest.Verification.Artifacts) == 0 && riskRank[evidence.Manifest.Change.Risk] >= riskRank[RiskMedium] {
+	if evidence.Compilation.ObligationsBuilt > 0 && !hasLinkedArtifacts && riskRank[evidence.Manifest.Change.Risk] >= riskRank[RiskMedium] {
 		evidence.Findings = append(evidence.Findings, Finding{
 			Verifier:    "evidence_linker",
 			Severity:    "high",
@@ -212,6 +213,19 @@ func verifyArtifactEvidence(evidence *Evidence) {
 			Claim:       "artifact-backed evidence is required for medium/high/critical changes",
 			Evidence:    fmt.Sprintf("change risk is %s and verification.artifacts is empty", evidence.Manifest.Change.Risk),
 			RequiredFix: "attach evidence artifacts that resolve to compiled obligations",
+		})
+	}
+	for _, artifact := range evidence.ArtifactResults {
+		if len(artifact.FailedTests) == 0 {
+			continue
+		}
+		evidence.Findings = append(evidence.Findings, Finding{
+			Verifier:    "test_adequacy",
+			Severity:    "high",
+			Decision:    "block",
+			Claim:       fmt.Sprintf("test evidence artifact %s reported failing tests", artifact.ID),
+			Evidence:    strings.Join(artifact.FailedTests, ", "),
+			RequiredFix: "fix failing tests before release",
 		})
 	}
 	for _, invalid := range evidence.InvalidEvidence {
