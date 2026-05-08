@@ -63,7 +63,7 @@ func CollectEvidenceWithOptions(repo string, manifestPath string, opts CollectEv
 		Reasons:                []string{},
 	}
 	obligationIndex := NewObligationIndex(evidence.VerificationPlans)
-	evidence.ArtifactResults, evidence.InvalidEvidence = LinkEvidenceArtifacts(absRepo, manifest.Verification.Artifacts, obligationIndex, ArtifactLinkOptions{RequireSigned: opts.RequireSigned})
+	evidence.ArtifactResults, evidence.InvalidEvidence = LinkEvidenceArtifacts(absRepo, manifest, manifest.Verification.Artifacts, obligationIndex, ArtifactLinkOptions{RequireSigned: opts.RequireSigned})
 	buildCoverage(&evidence)
 	runVerifiers(&evidence)
 	importVerifierFindings(&evidence)

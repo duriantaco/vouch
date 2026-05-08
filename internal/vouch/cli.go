@@ -220,6 +220,8 @@ func manifestCreate(repo string, args []string, jsonOut bool, stdout io.Writer, 
 	agent := flags.String("agent", "", "agent name")
 	runID := flags.String("run-id", "", "agent run id")
 	model := flags.String("model", "", "agent model")
+	runnerIdentity := flags.String("runner-identity", "", "expected runner identity for signed evidence")
+	runnerOIDCIssuer := flags.String("runner-oidc-issuer", "", "expected runner OIDC issuer for signed evidence")
 	base := flags.String("base", "main", "git base ref")
 	head := flags.String("head", "HEAD", "git head ref")
 	risk := flags.String("risk", "", "risk override")
@@ -238,6 +240,8 @@ func manifestCreate(repo string, args []string, jsonOut bool, stdout io.Writer, 
 		Agent:            *agent,
 		RunID:            *runID,
 		Model:            *model,
+		RunnerIdentity:   *runnerIdentity,
+		RunnerOIDCIssuer: *runnerOIDCIssuer,
 		Base:             *base,
 		Head:             *head,
 		Risk:             Risk(*risk),
@@ -273,6 +277,7 @@ func manifestAttachArtifact(repo string, args []string, jsonOut bool, stdout io.
 	producer := flags.String("producer", "", "artifact producer")
 	command := flags.String("command", "", "command that produced artifact")
 	sha256 := flags.String("sha256", "", "expected sha256")
+	evidenceBundle := flags.String("evidence-bundle", "", "Vouch evidence bundle path")
 	signatureBundle := flags.String("signature-bundle", "", "cosign signature bundle path")
 	signerIdentity := flags.String("signer-identity", "", "expected cosign signer identity")
 	signerOIDCIssuer := flags.String("signer-oidc-issuer", "", "expected cosign signer OIDC issuer")
@@ -302,6 +307,7 @@ func manifestAttachArtifact(repo string, args []string, jsonOut bool, stdout io.
 		Command:          *command,
 		ExitCode:         *exitCode,
 		SHA256:           *sha256,
+		EvidenceBundle:   *evidenceBundle,
 		SignatureBundle:  *signatureBundle,
 		SignerIdentity:   *signerIdentity,
 		SignerOIDCIssuer: *signerOIDCIssuer,
@@ -680,8 +686,8 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  contract create --name ID --owner OWNER --risk RISK --paths GLOB --behavior TEXT --required-test TEXT")
 	fmt.Fprintln(out, "  spec lint")
 	fmt.Fprintln(out, "  manifest check")
-	fmt.Fprintln(out, "  manifest create --task-id ID --summary TEXT --agent NAME --run-id ID --out FILE")
-	fmt.Fprintln(out, "  manifest attach-artifact --manifest FILE --id ID --kind KIND --path FILE --exit-code N [--signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE")
+	fmt.Fprintln(out, "  manifest create --task-id ID --summary TEXT --agent NAME --run-id ID [--runner-identity ID --runner-oidc-issuer URL] --out FILE")
+	fmt.Fprintln(out, "  manifest attach-artifact --manifest FILE --id ID --kind KIND --path FILE --exit-code N [--evidence-bundle FILE --signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE")
 	fmt.Fprintln(out, "  junit map --manifest FILE --junit FILE --test-map FILE --out FILE")
 	fmt.Fprintln(out, "  policy simulate [--manifest FILE] [--policy FILE] [--require-signed]")
 	fmt.Fprintln(out, "  verify [--policy FILE]")

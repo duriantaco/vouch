@@ -6,6 +6,7 @@ const (
 	SpecSchemaVersion       = "vouch.spec.v0"
 	ManifestSchemaVersion   = "vouch.manifest.v0"
 	EvidenceSchemaVersion   = "vouch.evidence.v0"
+	EvidenceBundleVersion   = "vouch.evidence_bundle.v0"
 	ASTSchemaVersion        = "vouch.ast.v0"
 	IRSchemaVersion         = "vouch.ir.v0"
 	PlanSchemaVersion       = "vouch.plan.v0"
@@ -215,9 +216,11 @@ type Change struct {
 }
 
 type Agent struct {
-	Name  string `json:"name"`
-	RunID string `json:"run_id"`
-	Model string `json:"model"`
+	Name             string `json:"name"`
+	RunID            string `json:"run_id"`
+	Model            string `json:"model"`
+	RunnerIdentity   string `json:"runner_identity,omitempty"`
+	RunnerOIDCIssuer string `json:"runner_oidc_issuer,omitempty"`
 }
 
 type Verification struct {
@@ -237,11 +240,41 @@ type EvidenceArtifact struct {
 	Command          string       `json:"command,omitempty"`
 	Path             string       `json:"path,omitempty"`
 	SHA256           string       `json:"sha256,omitempty"`
+	EvidenceBundle   string       `json:"evidence_bundle,omitempty"`
 	SignatureBundle  string       `json:"signature_bundle,omitempty"`
 	SignerIdentity   string       `json:"signer_identity,omitempty"`
 	SignerOIDCIssuer string       `json:"signer_oidc_issuer,omitempty"`
 	ExitCode         *int         `json:"exit_code"`
 	Obligations      []string     `json:"obligations"`
+}
+
+type EvidenceBundle struct {
+	Version      string                 `json:"version"`
+	ManifestID   string                 `json:"manifest_id"`
+	SpecsTouched []string               `json:"specs_touched"`
+	ChangeRisk   Risk                   `json:"change_risk"`
+	Artifact     EvidenceBundleArtifact `json:"artifact"`
+	Runner       EvidenceBundleRunner   `json:"runner"`
+	Timestamp    string                 `json:"timestamp"`
+}
+
+type EvidenceBundleArtifact struct {
+	ID          string       `json:"id"`
+	Kind        EvidenceKind `json:"kind"`
+	Path        string       `json:"path"`
+	SHA256      string       `json:"sha256"`
+	Producer    string       `json:"producer,omitempty"`
+	Command     string       `json:"command,omitempty"`
+	ExitCode    int          `json:"exit_code"`
+	Obligations []string     `json:"obligations"`
+}
+
+type EvidenceBundleRunner struct {
+	Identity   string `json:"identity"`
+	OIDCIssuer string `json:"oidc_issuer"`
+	AgentName  string `json:"agent_name,omitempty"`
+	AgentRunID string `json:"agent_run_id,omitempty"`
+	AgentModel string `json:"agent_model,omitempty"`
 }
 
 type TestResults struct {
@@ -400,6 +433,7 @@ type ArtifactResult struct {
 	ResolvedPath       string          `json:"resolved_path,omitempty"`
 	Status             string          `json:"status"`
 	HashVerified       bool            `json:"hash_verified"`
+	BundleVerified     bool            `json:"bundle_verified"`
 	SignatureVerified  bool            `json:"signature_verified"`
 	CoveredObligations []string        `json:"covered_obligations"`
 	VerifierOutput     *VerifierOutput `json:"-"`

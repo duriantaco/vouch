@@ -133,6 +133,10 @@ func validateArtifacts(artifacts []EvidenceArtifact) []string {
 				errors = append(errors, owner+" sha256 must be 64 hex characters")
 			}
 		}
+		hasSignedField := artifact.EvidenceBundle != "" || artifact.SignatureBundle != "" || artifact.SignerIdentity != "" || artifact.SignerOIDCIssuer != ""
+		if hasSignedField && (artifact.EvidenceBundle == "" || artifact.SignatureBundle == "" || artifact.SignerIdentity == "" || artifact.SignerOIDCIssuer == "") {
+			errors = append(errors, owner+" signed artifacts require evidence_bundle, signature_bundle, signer_identity, and signer_oidc_issuer together")
+		}
 		if len(artifact.Obligations) == 0 {
 			errors = append(errors, owner+" must reference at least one obligation")
 		}
