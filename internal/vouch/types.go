@@ -7,10 +7,14 @@ const (
 	ManifestSchemaVersion   = "vouch.manifest.v0"
 	EvidenceSchemaVersion   = "vouch.evidence.v0"
 	EvidenceBundleVersion   = "vouch.evidence_bundle.v0"
+	IntentSchemaVersion     = "vouch.intent.v0"
 	ASTSchemaVersion        = "vouch.ast.v0"
 	IRSchemaVersion         = "vouch.ir.v0"
 	PlanSchemaVersion       = "vouch.plan.v0"
 	ConfigSchemaVersion     = "vouch.config.v0"
+	CompileResultVersion    = "vouch.compile_result.v0"
+	ObligationsIRVersion    = "vouch.obligations_ir.v0"
+	PlanBundleVersion       = "vouch.verification_plan_bundle.v0"
 	TestMapSchemaVersion    = "vouch.test_map.v0"
 	PolicySchemaVersion     = "vouch.policy.v0"
 	PolicyInputVersion      = "vouch.policy_input.v0"
@@ -83,6 +87,7 @@ const (
 )
 
 type Intent struct {
+	Version        string
 	Feature        string
 	Owner          string
 	OwnedPaths     []string
@@ -188,6 +193,21 @@ type Obligation struct {
 	Severity         string         `json:"severity"`
 	Source           string         `json:"source"`
 	RequiredEvidence EvidenceKind   `json:"required_evidence"`
+	Generated        *GeneratedInfo `json:"generated,omitempty"`
+}
+
+type GeneratedInfo struct {
+	By         string          `json:"by"`
+	Mode       string          `json:"mode"`
+	Confidence string          `json:"confidence"`
+	Source     GeneratedSource `json:"source"`
+}
+
+type GeneratedSource struct {
+	Type   string `json:"type"`
+	File   string `json:"file,omitempty"`
+	Symbol string `json:"symbol,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type Manifest struct {

@@ -41,6 +41,7 @@ func needsWrite(repo string, result Result) bool {
 
 func renderIntent(draft Draft) string {
 	var b strings.Builder
+	writeScalar(&b, "version", "vouch.intent.v0")
 	writeScalar(&b, "feature", draft.Component)
 	writeScalar(&b, "owner", draft.Owner)
 	writeScalar(&b, "risk", draft.Risk)

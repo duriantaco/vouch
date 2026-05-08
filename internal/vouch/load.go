@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 )
 
@@ -45,7 +46,10 @@ func LoadSpecs(repo string) (map[string]Spec, error) {
 			return nil, err
 		}
 		if spec.ID != "" {
-			if _, exists := specs[spec.ID]; exists {
+			if existing, exists := specs[spec.ID]; exists {
+				if reflect.DeepEqual(existing, spec) {
+					continue
+				}
 				return nil, fmt.Errorf("duplicate spec id %q in %s", spec.ID, path)
 			}
 			specs[spec.ID] = spec

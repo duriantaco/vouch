@@ -259,6 +259,7 @@ type SourceValue[T any] struct {
 }
 
 type TypedIntent struct {
+	Version        SourceValue[string]
 	Feature        SourceValue[string]
 	Owner          SourceValue[string]
 	OwnedPaths     []SourceValue[string]
@@ -286,6 +287,8 @@ func AnalyzeIntentAST(ast IntentAST) (TypedIntent, []Diagnostic) {
 	for _, node := range ast.Nodes {
 		spans[node.Key] = node.Span
 		switch node.Key {
+		case "version":
+			typed.Version = SourceValue[string]{Value: node.Value, Span: node.Span}
 		case "feature":
 			typed.Feature = SourceValue[string]{Value: node.Value, Span: node.Span}
 		case "owner":
@@ -324,6 +327,7 @@ func AnalyzeIntentAST(ast IntentAST) (TypedIntent, []Diagnostic) {
 
 func (typed TypedIntent) Intent() Intent {
 	return Intent{
+		Version:        typed.Version.Value,
 		Feature:        typed.Feature.Value,
 		Owner:          typed.Owner.Value,
 		OwnedPaths:     sourceValues(typed.OwnedPaths),
@@ -356,6 +360,7 @@ func ValidateIntentDiagnostics(intent Intent) []Diagnostic {
 func ValidateIntentDiagnosticsWithSpans(intent Intent, spans map[string]SourceSpan) []Diagnostic {
 	typed := TypedIntent{
 		Feature:        SourceValue[string]{Value: intent.Feature, Span: spans["feature"]},
+		Version:        SourceValue[string]{Value: intent.Version, Span: spans["version"]},
 		Owner:          SourceValue[string]{Value: intent.Owner, Span: spans["owner"]},
 		OwnedPaths:     sourceStringsWithSpan(intent.OwnedPaths, spans["owned_paths"]),
 		Risk:           SourceValue[Risk]{Value: intent.Risk, Span: spans["risk"]},
@@ -376,6 +381,9 @@ func ValidateIntentDiagnosticsWithSpans(intent Intent, spans map[string]SourceSp
 
 func ValidateTypedIntent(intent TypedIntent) []Diagnostic {
 	var diagnostics []Diagnostic
+	if intent.Version.Value != "" && intent.Version.Value != IntentSchemaVersion {
+		diagnostics = append(diagnostics, diagnostic("error", "intent.invalid_version", fmt.Sprintf("version must be %s", IntentSchemaVersion), "version", intent.span("version")))
+	}
 	if intent.Feature.Value == "" {
 		diagnostics = append(diagnostics, diagnostic("error", "intent.required_feature", "feature is required", "feature", intent.span("feature")))
 	}
@@ -436,7 +444,7 @@ func supportedIntentKey(key string) bool {
 }
 
 func supportedScalarIntentKey(key string) bool {
-	return key == "feature" || key == "owner" || key == "risk" || key == "goal"
+	return key == "version" || key == "feature" || key == "owner" || key == "risk" || key == "goal"
 }
 
 func supportsListSection(key string) bool {

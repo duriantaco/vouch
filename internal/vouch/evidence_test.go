@@ -120,8 +120,9 @@ func TestIntentParsesToStableASTWithSourceSpans(t *testing.T) {
 	if ast.Version != ASTSchemaVersion {
 		t.Fatalf("unexpected AST version %s", ast.Version)
 	}
-	if len(ast.Nodes) == 0 || ast.Nodes[0].Key != "feature" || ast.Nodes[0].Value != "auth.password_reset" {
-		t.Fatalf("unexpected first AST node: %#v", ast.Nodes)
+	feature := findASTNode(ast, "feature")
+	if feature == nil || feature.Value != "auth.password_reset" {
+		t.Fatalf("unexpected feature AST node: %#v", ast.Nodes)
 	}
 	behavior := findASTNode(ast, "behavior")
 	if behavior == nil {

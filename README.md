@@ -432,12 +432,14 @@ Vouch has compiler-like stages:
 
 Making it more compiler-like is useful because it makes the system more accurate in the areas that matter here. These things include deterministic parsing, typed intermediate representations, structured diagnostics, generated artifacts, and auditable policy decisions.
 
-The current implementation is early. Policy is still hard-coded, generic non-JUnit artifacts are shallow, and contract suggestions are structural heuristics. The compiler direction is still the right direction because the value is in deterministic obligations and evidence linkage, not in another generic "merge or don't merge" opinion.
+The current implementation is early. Policy is file-backed but still simple, generic non-JUnit artifacts are shallow, and contract suggestions are structural heuristics. The compiler direction is still the right direction because the value is in deterministic obligations and evidence linkage, not in another generic "merge or don't merge" opinion.
 
 ## Current Pipeline
 
 | Command Area | Input | Output |
 | --- | --- | --- |
+| `bootstrap` | repo signals | draft intents plus bootstrap report |
+| `compile` | `.vouch/intents/*.yaml` | specs, aggregate obligation IR, and verification plan |
 | `intent parse` | `.vouch/intents/*.yaml` | `vouch.ast.v0` with source spans and diagnostics |
 | `intent compile` | Intent AST | `vouch.spec.v0` JSON |
 | `ir build` | Spec JSON | `vouch.ir.v0` obligations |
@@ -515,6 +517,13 @@ The demo uses a synthetic high-risk `auth.password_reset` change because it exer
 - Email side effects.
 
 The demo exercises the compiler plumbing and failure modes. It does not prove Vouch can infer or verify password reset correctness from application code.
+
+Run the repo-level compiler pipeline:
+
+```sh
+vouch --repo demo_repo compile
+vouch --repo demo_repo compile --emit ir
+```
 
 Parse intent into a typed AST:
 
@@ -628,6 +637,8 @@ vouch --repo /path/to/repo manifest attach-artifact \
 
 ```sh
 vouch --repo DIR init
+vouch --repo DIR bootstrap
+vouch --repo DIR compile [--emit ast|spec|ir|plan]
 vouch --repo DIR contract suggest
 vouch --repo DIR contract create --name ID --owner OWNER --risk RISK --paths GLOB --behavior TEXT --required-test TEXT
 vouch intent parse --intent FILE --out FILE
