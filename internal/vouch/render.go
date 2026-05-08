@@ -48,6 +48,56 @@ func RenderGate(evidence Evidence) string {
 	return b.String()
 }
 
+func RenderGitHubSummary(evidence Evidence) string {
+	covered, total := obligationCoverageCounts(evidence)
+	var b strings.Builder
+	b.WriteString("# Vouch Gate\n\n")
+	b.WriteString("| Field | Value |\n")
+	b.WriteString("| --- | --- |\n")
+	fmt.Fprintf(&b, "| Decision | `%s` |\n", markdownCell(evidence.Decision))
+	fmt.Fprintf(&b, "| Risk | `%s` |\n", markdownCell(string(evidence.Manifest.Change.Risk)))
+	fmt.Fprintf(&b, "| Obligations | `%d/%d covered` |\n", covered, total)
+	fmt.Fprintf(&b, "| Policy | `%s` |\n", markdownCell(evidence.PolicyPath))
+	b.WriteByte('\n')
+
+	if len(evidence.Reasons) > 0 {
+		b.WriteString("## Reasons\n\n")
+		for _, reason := range evidence.Reasons {
+			fmt.Fprintf(&b, "- %s\n", reason)
+		}
+		b.WriteByte('\n')
+	}
+
+	b.WriteString("## Components\n\n")
+	if len(evidence.RequiredObligations) == 0 {
+		b.WriteString("No compiled obligations were required for this gate.\n\n")
+	} else {
+		for _, specID := range sortedRenderKeys(evidence.RequiredObligations) {
+			fmt.Fprintf(&b, "### `%s`\n\n", markdownCell(specID))
+			b.WriteString("| Status | Obligation | Accepted Evidence |\n")
+			b.WriteString("| --- | --- | --- |\n")
+			for _, obligation := range evidence.CoveredObligations[specID] {
+				fmt.Fprintf(&b, "| Covered | `%s` | `%s` |\n", markdownCell(renderShortObligationID(specID, obligation.ID)), obligation.RequiredEvidence)
+			}
+			for _, obligation := range evidence.MissingObligations[specID] {
+				fmt.Fprintf(&b, "| Missing | `%s` | `%s` |\n", markdownCell(renderShortObligationID(specID, obligation.ID)), obligation.RequiredEvidence)
+			}
+			b.WriteByte('\n')
+		}
+	}
+
+	if len(evidence.Findings) > 0 {
+		b.WriteString("## Findings\n\n")
+		b.WriteString("| Decision | Verifier | Claim | Required Fix |\n")
+		b.WriteString("| --- | --- | --- | --- |\n")
+		for _, finding := range evidence.Findings {
+			fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s |\n", markdownCell(finding.Decision), markdownCell(finding.Verifier), markdownCell(finding.Claim), markdownCell(finding.RequiredFix))
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 func GateResultFromEvidence(evidence Evidence) GateResult {
 	return GateResult{
 		Version:            "vouch.gate_result.v0",
@@ -227,4 +277,20 @@ func obligationTextMap(items map[string][]Obligation) map[string][]string {
 
 func renderShortObligationID(specID string, obligationID string) string {
 	return strings.TrimPrefix(obligationID, specID+".")
+}
+
+func obligationCoverageCounts(evidence Evidence) (int, int) {
+	total := 0
+	covered := 0
+	for _, specID := range sortedRenderKeys(evidence.RequiredObligations) {
+		total += len(evidence.RequiredObligations[specID])
+		covered += len(evidence.CoveredObligations[specID])
+	}
+	return covered, total
+}
+
+func markdownCell(value string) string {
+	value = strings.ReplaceAll(value, "|", "\\|")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return strings.TrimSpace(value)
 }

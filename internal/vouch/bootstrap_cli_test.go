@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	bootstrap "vouch/internal/vouch/bootstrap"
+	bootstrap "github.com/duriantaco/vouch/internal/vouch/bootstrap"
 )
 
 func TestBootstrapDryRunDraftsConservativeContracts(t *testing.T) {

@@ -1,4 +1,4 @@
-module vouch
+module github.com/duriantaco/vouch
 
 go 1.26
 
