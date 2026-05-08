@@ -2,11 +2,15 @@
   <img src="assets/vouch.png" alt="Vouch logo" width="240">
 </p>
 
-# Vouch (Beta)
+# Vouch
+
+Vouch is an intent compiler for AI-written code.
+
+It drafts conservative release contracts from signals already present in your repo: tests, CODEOWNERS, OpenAPI specs, CI config, and evidence artifacts. It then compiles accepted contracts into machine-checkable obligations and gates releases on linked evidence.
+
+Vouch does not guess your product intent. Humans own intent. `vouch bootstrap` creates contract drafts with provenance so you can accept, edit, or reject them.
 
 ## What Vouch Is Today
-
-Vouch is a beta contract-and-evidence gate for agent-written changes.
 
 It compiles human-owned intent YAML into typed specs, obligation IR, verification plans, and runner/verifier/release artifacts. It then validates a change manifest and linked evidence artifacts to produce a deterministic release decision: `block`, `human_escalation`, `canary`, or `auto_merge`.
 
@@ -20,7 +24,13 @@ Use this when you have an existing repo and want Vouch to produce a release deci
 
 ### 0. Install The CLI
 
-From the Vouch checkout:
+Install from GitHub:
+
+```sh
+go install github.com/duriantaco/vouch/cmd/vouch@latest
+```
+
+Or, from the Vouch checkout:
 
 ```sh
 go install ./cmd/vouch
@@ -39,6 +49,16 @@ export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
 If you are developing Vouch itself and do not want to install the binary, replace `vouch` with `go run ./cmd/vouch` in the commands below.
+
+Fast v0.2 flow:
+
+```sh
+vouch bootstrap
+vouch compile
+pytest --junitxml .vouch/artifacts/pytest.xml
+vouch evidence import junit .vouch/artifacts/pytest.xml
+vouch gate
+```
 
 The mental model:
 
@@ -650,6 +670,16 @@ vouch --repo /path/to/repo evidence import junit .vouch/artifacts/pytest.xml
 vouch --repo /path/to/repo gate
 ```
 
+## GitHub PR Summary
+
+Use `gate --github-summary` in GitHub Actions to append a Markdown decision report to the pull request job summary:
+
+```sh
+vouch gate --github-summary
+```
+
+The command writes to `$GITHUB_STEP_SUMMARY` and still exits non-zero when the release decision is `block`. A copyable workflow example lives at [`docs/github-action-example.yml`](docs/github-action-example.yml).
+
 ## Commands
 
 ```sh
@@ -671,7 +701,7 @@ vouch --repo DIR --manifest FILE junit map --junit FILE --test-map FILE --out FI
 vouch --repo DIR evidence import junit [--out FILE] FILE
 vouch --repo DIR --manifest FILE policy simulate [--policy FILE] [--require-signed]
 vouch --repo DIR --manifest FILE verify [--policy FILE]
-vouch --repo DIR --manifest FILE gate [--policy FILE] [--out FILE] [--require-signed]
+vouch --repo DIR --manifest FILE gate [--policy FILE] [--out FILE] [--github-summary] [--require-signed]
 vouch --repo DIR --manifest FILE evidence [--policy FILE]
 ```
 

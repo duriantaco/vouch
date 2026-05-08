@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"vouch/internal/vouch"
+	"github.com/duriantaco/vouch/internal/vouch"
 )
 
 func main() {

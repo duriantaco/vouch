@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	bootstrap "vouch/internal/vouch/bootstrap"
+	bootstrap "github.com/duriantaco/vouch/internal/vouch/bootstrap"
 )
 
 type RepoCompileOutput struct {

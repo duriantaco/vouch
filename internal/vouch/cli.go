@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	bootstrap "vouch/internal/vouch/bootstrap"
+	bootstrap "github.com/duriantaco/vouch/internal/vouch/bootstrap"
 )
 
 func Main(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -745,10 +745,12 @@ func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.
 	flags.SetOutput(stderr)
 	gateOut := ""
 	requireSigned := false
+	githubSummary := false
 	policyPath := flags.String("policy", "", "release policy path")
 	if mode == "gate" {
 		flags.StringVar(&gateOut, "out", "", "path to write compact gate result JSON")
 		flags.BoolVar(&requireSigned, "require-signed", false, "require cosign-verified evidence artifacts")
+		flags.BoolVar(&githubSummary, "github-summary", false, "append a Markdown gate summary to GITHUB_STEP_SUMMARY")
 	}
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -770,6 +772,12 @@ func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.
 	}
 	if gateOut != "" {
 		if err := writeJSONFile(resolveRepoOutput(repo, gateOut), GateResultFromEvidence(evidence)); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	if githubSummary {
+		if err := appendGitHubSummary(evidence); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -826,6 +834,25 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  policy simulate [--manifest FILE] [--policy FILE] [--require-signed]")
 	fmt.Fprintln(out, "  evidence import junit [--out FILE] FILE")
 	fmt.Fprintln(out, "  verify [--policy FILE]")
-	fmt.Fprintln(out, "  gate [--policy FILE] [--out FILE] [--require-signed]")
+	fmt.Fprintln(out, "  gate [--policy FILE] [--out FILE] [--github-summary] [--require-signed]")
 	fmt.Fprintln(out, "  evidence [--policy FILE]")
+}
+
+func appendGitHubSummary(evidence Evidence) error {
+	path := strings.TrimSpace(os.Getenv("GITHUB_STEP_SUMMARY"))
+	if path == "" {
+		return errors.New("gate --github-summary requires GITHUB_STEP_SUMMARY to be set")
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := fmt.Fprint(file, RenderGitHubSummary(evidence)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(file, "\n"); err != nil {
+		return err
+	}
+	return nil
 }
