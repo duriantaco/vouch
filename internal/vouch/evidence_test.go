@@ -1847,6 +1847,7 @@ func TestRequireSignedAcceptsCosignVerifiedArtifacts(t *testing.T) {
 		Runtime:  ManifestRuntime{Metrics: []string{"ui.rendered"}},
 		Rollback: ManifestRollback{Strategy: "revert_commit"},
 	})
+	writeAllowedSigners(t, repo, signerIdentity, signerOIDCIssuer)
 	writeArtifact(t, repo, "artifacts/behavior.json", `{"status":"pass","obligations":["`+behaviorID+`"]}`)
 	writeArtifact(t, repo, "artifacts/security.json", `{"status":"pass","obligations":["`+securityID+`"]}`)
 	writeArtifact(t, repo, "artifacts/runtime.json", `{"status":"pass","obligations":["`+runtimeID+`"]}`)
@@ -1917,6 +1918,23 @@ func TestRequireSignedRejectsRunnerIdentityMismatch(t *testing.T) {
 	}
 	if !hasInvalidEvidence(evidence, "behavior", "evidence_bundle") {
 		t.Fatalf("expected behavior bundle to be invalid: %#v", evidence.InvalidEvidence)
+	}
+}
+
+func TestRequireSignedRejectsSignerOutsideRepoAllowlist(t *testing.T) {
+	installFakeCosign(t, 0)
+	repo, manifestPath, _ := writeFullyCoveredUIScenario(t, nil)
+	attachSignedBundles(t, repo, manifestPath, nil)
+	writeAllowedSigners(t, repo, "https://github.com/example/repo/.github/workflows/other.yml@refs/heads/main", "https://token.actions.githubusercontent.com")
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected signer outside allowlist to block, got %s", evidence.Decision)
+	}
+	if !hasInvalidEvidence(evidence, "behavior", "signer_not_allowed") {
+		t.Fatalf("expected behavior signer to be rejected: %#v", evidence.InvalidEvidence)
 	}
 }
 
@@ -2129,6 +2147,7 @@ func attachSignedBundles(t *testing.T, repo string, manifestPath string, mutate 
 	t.Helper()
 	signerIdentity := "https://github.com/example/repo/.github/workflows/vouch.yml@refs/heads/main"
 	signerOIDCIssuer := "https://token.actions.githubusercontent.com"
+	writeAllowedSigners(t, repo, signerIdentity, signerOIDCIssuer)
 	manifest := mustLoadManifest(t, manifestPath)
 	manifest.Agent = Agent{
 		Name:             "codex",
@@ -2149,6 +2168,20 @@ func attachSignedBundles(t *testing.T, repo string, manifestPath string, mutate 
 		writeArtifact(t, repo, artifact.SignatureBundle, `{"mediaType":"application/vnd.dev.sigstore.bundle+json"}`)
 		writeEvidenceBundle(t, repo, artifact.EvidenceBundle, manifest, artifact, mutate)
 	}
+}
+
+func writeAllowedSigners(t *testing.T, repo string, identity string, issuer string) {
+	t.Helper()
+	config := LoadConfigOrDefault(repo)
+	config.AllowedSigners = []AllowedSigner{{
+		Identity:   identity,
+		OIDCIssuer: issuer,
+	}}
+	configPath := filepath.Join(repo, ".vouch", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, configPath, config)
 }
 
 func writeScenario(t *testing.T, spec Spec, manifest Manifest) (string, string) {
