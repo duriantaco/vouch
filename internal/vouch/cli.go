@@ -96,6 +96,9 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "gate":
 		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "gate", rest[1:])
 	case "evidence":
+		if len(rest) >= 3 && rest[1] == "import" {
+			return evidenceImport(absRepo, rest[2:], common.json, stdout, stderr)
+		}
 		return collectAndRender(absRepo, manifest, common.json, stdout, stderr, "evidence-no-exit", rest[1:])
 	}
 	usage(stderr)
@@ -447,6 +450,45 @@ func junitMap(repo string, args []string, jsonOut bool, stdout io.Writer, stderr
 	return 0
 }
 
+func evidenceImport(repo string, args []string, jsonOut bool, stdout io.Writer, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "evidence import requires a format: junit")
+		return 2
+	}
+	format := args[0]
+	flags := flag.NewFlagSet("evidence import "+format, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	outPath := flags.String("out", "", "evidence manifest output path")
+	if err := flags.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if format != "junit" {
+		fmt.Fprintf(stderr, "evidence import: unsupported format %q\n", format)
+		return 2
+	}
+	if flags.NArg() != 1 {
+		fmt.Fprintln(stderr, "evidence import junit requires exactly one JUnit XML path")
+		return 2
+	}
+	result, err := ImportJUnitEvidence(repo, EvidenceImportOptions{
+		ArtifactPath: flags.Arg(0),
+		Out:          *outPath,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if jsonOut {
+		return renderCommandJSON(result, stdout, stderr)
+	}
+	fmt.Fprintf(stdout, "Imported JUnit evidence %s -> %s\n", result.InputPath, result.OutputPath)
+	fmt.Fprintf(stdout, "Linked obligations: %d\n", len(result.Links))
+	if len(result.UnmatchedObligations) > 0 {
+		fmt.Fprintf(stdout, "Unmatched obligations: %d\n", len(result.UnmatchedObligations))
+	}
+	return 0
+}
+
 func renderCommandJSON(value any, stdout io.Writer, stderr io.Writer) int {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -715,7 +757,13 @@ func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.
 		fmt.Fprintf(stderr, "%s: unexpected argument %q\n", mode, flags.Arg(0))
 		return 2
 	}
-	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: requireSigned, PolicyPath: *policyPath})
+	var evidence Evidence
+	var err error
+	if shouldUseEvidenceManifestFallback(repo, manifestPath) {
+		evidence, err = CollectEvidenceFromEvidenceManifest(repo, DefaultEvidenceManifest(repo), CollectEvidenceOptions{RequireSigned: requireSigned, PolicyPath: *policyPath})
+	} else {
+		evidence, err = CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: requireSigned, PolicyPath: *policyPath})
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -776,6 +824,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  manifest attach-artifact --manifest FILE --id ID --kind KIND --path FILE --exit-code N [--evidence-bundle FILE --signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE")
 	fmt.Fprintln(out, "  junit map --manifest FILE --junit FILE --test-map FILE --out FILE")
 	fmt.Fprintln(out, "  policy simulate [--manifest FILE] [--policy FILE] [--require-signed]")
+	fmt.Fprintln(out, "  evidence import junit [--out FILE] FILE")
 	fmt.Fprintln(out, "  verify [--policy FILE]")
 	fmt.Fprintln(out, "  gate [--policy FILE] [--out FILE] [--require-signed]")
 	fmt.Fprintln(out, "  evidence [--policy FILE]")

@@ -15,6 +15,7 @@ Run from the parent directory:
 ```sh
 vouch --repo demo_repo compile
 vouch --repo demo_repo compile --emit ir
+vouch --repo demo_repo evidence import junit artifacts/junit-pass.xml
 vouch intent parse --intent demo_repo/.vouch/intents/auth.password_reset.yaml --out /tmp/auth.password_reset.ast.json
 vouch intent compile --intent demo_repo/.vouch/intents/auth.password_reset.yaml --out /tmp/auth.password_reset.json
 vouch ir build --spec demo_repo/.vouch/specs/auth.password_reset.json --out /tmp/auth.password_reset.ir.json

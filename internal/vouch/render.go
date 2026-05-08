@@ -29,6 +29,22 @@ func RenderGate(evidence Evidence) string {
 	for _, reason := range evidence.Reasons {
 		fmt.Fprintf(&b, "- %s\n", reason)
 	}
+	for _, specID := range sortedRenderKeys(evidence.RequiredObligations) {
+		fmt.Fprintf(&b, "\nComponent:\n  %s\n", specID)
+		if len(evidence.CoveredObligations[specID]) > 0 {
+			b.WriteString("Covered:\n")
+			for _, obligation := range evidence.CoveredObligations[specID] {
+				fmt.Fprintf(&b, "  - %s\n", renderShortObligationID(specID, obligation.ID))
+			}
+		}
+		if len(evidence.MissingObligations[specID]) > 0 {
+			b.WriteString("Missing:\n")
+			for _, obligation := range evidence.MissingObligations[specID] {
+				fmt.Fprintf(&b, "  - %s\n", renderShortObligationID(specID, obligation.ID))
+				fmt.Fprintf(&b, "    accepted evidence: %s\n", obligation.RequiredEvidence)
+			}
+		}
+	}
 	return b.String()
 }
 
@@ -207,4 +223,8 @@ func obligationTextMap(items map[string][]Obligation) map[string][]string {
 		}
 	}
 	return out
+}
+
+func renderShortObligationID(specID string, obligationID string) string {
+	return strings.TrimPrefix(obligationID, specID+".")
 }

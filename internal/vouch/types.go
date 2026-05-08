@@ -6,6 +6,7 @@ const (
 	SpecSchemaVersion       = "vouch.spec.v0"
 	ManifestSchemaVersion   = "vouch.manifest.v0"
 	EvidenceSchemaVersion   = "vouch.evidence.v0"
+	EvidenceManifestVersion = "vouch.evidence_manifest.v0"
 	EvidenceBundleVersion   = "vouch.evidence_bundle.v0"
 	IntentSchemaVersion     = "vouch.intent.v0"
 	ASTSchemaVersion        = "vouch.ast.v0"
@@ -437,6 +438,33 @@ type Evidence struct {
 	Findings               []Finding                   `json:"findings"`
 	Decision               string                      `json:"decision"`
 	Reasons                []string                    `json:"reasons"`
+}
+
+type EvidenceManifest struct {
+	Version      string                 `json:"version"`
+	ArtifactType string                 `json:"artifact_type"`
+	ArtifactPath string                 `json:"artifact_path"`
+	Links        []EvidenceManifestLink `json:"links"`
+}
+
+type EvidenceManifestLink struct {
+	ObligationID     string       `json:"obligation_id"`
+	ArtifactType     string       `json:"artifact_type"`
+	ArtifactPath     string       `json:"artifact_path"`
+	Testcase         string       `json:"testcase"`
+	Status           string       `json:"status"`
+	Component        string       `json:"component"`
+	RequiredEvidence EvidenceKind `json:"required_evidence"`
+}
+
+type EvidenceImportResult struct {
+	Version              string                 `json:"version"`
+	InputPath            string                 `json:"input_path"`
+	OutputPath           string                 `json:"output_path"`
+	ArtifactType         string                 `json:"artifact_type"`
+	Links                []EvidenceManifestLink `json:"links"`
+	CoveredObligations   []string               `json:"covered_obligations"`
+	UnmatchedObligations []string               `json:"unmatched_obligations"`
 }
 
 type CompilationStats struct {

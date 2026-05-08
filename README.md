@@ -157,6 +157,15 @@ cd /path/to/your/repo
 pytest --junitxml .vouch/artifacts/pytest.xml
 ```
 
+For the repo-level v0.2 flow, import JUnit evidence directly:
+
+```sh
+vouch --repo /path/to/your/repo evidence import junit .vouch/artifacts/pytest.xml
+vouch --repo /path/to/your/repo gate
+```
+
+This writes `.vouch/evidence/manifest.json` and gates against the compiled obligation IR. JUnit only satisfies required-test obligations, so security, runtime, rollback, and behavior obligations still need their own evidence.
+
 For a simple smoke check, write an artifact that names the obligation IDs it covers:
 
 ```json
@@ -446,6 +455,7 @@ The current implementation is early. Policy is file-backed but still simple, gen
 | `plan build` | IR plus change manifest | `vouch.plan.v0` verification plan |
 | `artifacts build` | Spec JSON | runner/verifier/release artifacts |
 | `junit map` | raw pytest/JUnit and `.vouch/test-map.json` | Vouch-compatible JUnit evidence |
+| `evidence import junit` | raw pytest/JUnit and compiled obligation IR | `.vouch/evidence/manifest.json` |
 | `policy simulate` | manifest, evidence, and release policy | policy input and release decision |
 | `evidence`, `verify`, `gate` | manifest and linked artifacts | findings and release decision |
 | Generic onboarding | repo shape and changed files | `.vouch` layout, contract suggestions, manifests, attached artifacts |
@@ -633,6 +643,13 @@ vouch --repo /path/to/repo manifest attach-artifact \
   --out .vouch/manifests/run-123.json
 ```
 
+For the repo-level v0.2 path, import raw JUnit into an evidence manifest:
+
+```sh
+vouch --repo /path/to/repo evidence import junit .vouch/artifacts/pytest.xml
+vouch --repo /path/to/repo gate
+```
+
 ## Commands
 
 ```sh
@@ -651,6 +668,7 @@ vouch --repo DIR --manifest FILE manifest check
 vouch --repo DIR manifest create --task-id ID --summary TEXT --agent NAME --run-id ID [--runner-identity ID --runner-oidc-issuer URL] --out FILE
 vouch --repo DIR --manifest FILE manifest attach-artifact --id ID --kind KIND --path FILE --exit-code N [--evidence-bundle FILE --signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE
 vouch --repo DIR --manifest FILE junit map --junit FILE --test-map FILE --out FILE
+vouch --repo DIR evidence import junit [--out FILE] FILE
 vouch --repo DIR --manifest FILE policy simulate [--policy FILE] [--require-signed]
 vouch --repo DIR --manifest FILE verify [--policy FILE]
 vouch --repo DIR --manifest FILE gate [--policy FILE] [--out FILE] [--require-signed]
