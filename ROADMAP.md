@@ -212,15 +212,19 @@ Planned work:
 
 Make the system usable by teams.
 
-Planned work:
+Implemented base:
 
 - Runner identity in manifests and evidence artifacts.
-- Allowed signer policy for contracts or repo policy.
-- Detached signatures over canonical evidence bundles.
+- Detached signatures over Vouch evidence bundles.
 - Hardened `gate --require-signed` mode that binds manifest, artifact hashes, and obligation IDs.
-- Signed specs and manifests.
-- Agent identity and run provenance.
 - Tamper-evident evidence bundles.
+- Agent identity and run provenance in bundle validation.
+
+Remaining work:
+
+- Allowed signer policy for contracts or repo policy.
+- Canonical JSON serialization rules for evidence bundles.
+- Signed specs and manifests.
 - Role-based approval exceptions.
 - Organization-level policy packs.
 - Multi-repo spec registry.
@@ -230,9 +234,8 @@ Planned work:
 
 The next useful contributions are:
 
-- Signed or hashed evidence bundle format.
-- Runner identity and allowed signer fields.
-- Hardened `gate --require-signed` production mode.
+- Allowed signer policy for contracts or repo policy.
+- Signed specs and manifests.
 - Rego policy adapter decision spike.
 - Reference workflow for `init -> manifest -> pytest -> junit map -> attach -> gate`.
 - Real-world case study showing a plausible bad agent change blocked by an obligation.

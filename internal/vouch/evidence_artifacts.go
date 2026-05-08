@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type ObligationIndex struct {
@@ -32,7 +33,7 @@ func NewObligationIndex(plans map[string]VerificationPlan) ObligationIndex {
 	return index
 }
 
-func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index ObligationIndex, opts ArtifactLinkOptions) ([]ArtifactResult, []InvalidEvidence) {
+func LinkEvidenceArtifacts(repo string, manifest Manifest, artifacts []EvidenceArtifact, index ObligationIndex, opts ArtifactLinkOptions) ([]ArtifactResult, []InvalidEvidence) {
 	results := make([]ArtifactResult, 0, len(artifacts))
 	var invalid []InvalidEvidence
 	for _, artifact := range artifacts {
@@ -72,8 +73,8 @@ func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index Obli
 					result.addIssue("artifact_missing", fmt.Sprintf("cannot read artifact path %s: %v", artifact.Path, err))
 				} else {
 					data = bytes
+					actual := sha256Hex(data)
 					if artifact.SHA256 != "" {
-						actual := sha256Hex(data)
 						if !strings.EqualFold(actual, artifact.SHA256) {
 							result.addIssue("sha256_mismatch", fmt.Sprintf("artifact %s sha256 mismatch: expected %s got %s", artifact.ID, artifact.SHA256, actual))
 						} else {
@@ -87,7 +88,7 @@ func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index Obli
 		}
 
 		if opts.RequireSigned && len(data) > 0 {
-			verifyCosignBundle(repo, artifact, result.ResolvedPath, &result)
+			verifySignedEvidenceBundle(repo, manifest, artifact, data, &result)
 		}
 
 		if artifact.Kind == EvidenceVerifierOutput {
@@ -138,7 +139,11 @@ func LinkEvidenceArtifacts(repo string, artifacts []EvidenceArtifact, index Obli
 	return results, invalid
 }
 
-func verifyCosignBundle(repo string, artifact EvidenceArtifact, artifactPath string, result *ArtifactResult) {
+func verifySignedEvidenceBundle(repo string, manifest Manifest, artifact EvidenceArtifact, artifactData []byte, result *ArtifactResult) {
+	if artifact.EvidenceBundle == "" {
+		result.addIssue("missing_evidence_bundle", "evidence_bundle is required when signed evidence is enforced")
+		return
+	}
 	if artifact.SignatureBundle == "" {
 		result.addIssue("missing_signature_bundle", "signature_bundle is required when signed evidence is enforced")
 		return
@@ -151,12 +156,38 @@ func verifyCosignBundle(repo string, artifact EvidenceArtifact, artifactPath str
 		result.addIssue("missing_signer_oidc_issuer", "signer_oidc_issuer is required when signed evidence is enforced")
 		return
 	}
-	bundlePath, err := resolveArtifactPath(repo, artifact.SignatureBundle)
+	evidenceBundlePath, err := resolveArtifactPath(repo, artifact.EvidenceBundle)
+	if err != nil {
+		result.addIssue("evidence_bundle_path_escape", err.Error())
+		return
+	}
+	evidenceBundleData, err := os.ReadFile(evidenceBundlePath)
+	if err != nil {
+		result.addIssue("evidence_bundle_missing", fmt.Sprintf("cannot read evidence bundle %s: %v", artifact.EvidenceBundle, err))
+		return
+	}
+	bundle, issues := importEvidenceBundle(evidenceBundleData)
+	for _, issue := range issues {
+		result.addIssue("evidence_bundle_import", issue)
+	}
+	if len(issues) > 0 {
+		return
+	}
+	for _, issue := range validateEvidenceBundle(bundle, manifest, artifact, artifactData) {
+		result.addIssue("evidence_bundle", issue)
+	}
+	if len(result.Issues) > 0 {
+		return
+	}
+	result.HashVerified = true
+	result.BundleVerified = true
+
+	signatureBundlePath, err := resolveArtifactPath(repo, artifact.SignatureBundle)
 	if err != nil {
 		result.addIssue("signature_bundle_path_escape", err.Error())
 		return
 	}
-	if _, err := os.Stat(bundlePath); err != nil {
+	if _, err := os.Stat(signatureBundlePath); err != nil {
 		result.addIssue("signature_bundle_missing", fmt.Sprintf("cannot read signature bundle %s: %v", artifact.SignatureBundle, err))
 		return
 	}
@@ -167,8 +198,8 @@ func verifyCosignBundle(repo string, artifact EvidenceArtifact, artifactPath str
 	}
 	cmd := exec.Command(cosignPath,
 		"verify-blob",
-		artifactPath,
-		"--bundle", bundlePath,
+		evidenceBundlePath,
+		"--bundle", signatureBundlePath,
 		"--certificate-identity="+artifact.SignerIdentity,
 		"--certificate-oidc-issuer="+artifact.SignerOIDCIssuer,
 	)
@@ -182,6 +213,108 @@ func verifyCosignBundle(repo string, artifact EvidenceArtifact, artifactPath str
 		return
 	}
 	result.SignatureVerified = true
+}
+
+func importEvidenceBundle(data []byte) (EvidenceBundle, []string) {
+	var bundle EvidenceBundle
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&bundle); err != nil {
+		return bundle, []string{fmt.Sprintf("cannot parse evidence bundle JSON: %v", err)}
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return bundle, []string{"trailing JSON content after evidence bundle"}
+	}
+	return bundle, nil
+}
+
+func validateEvidenceBundle(bundle EvidenceBundle, manifest Manifest, artifact EvidenceArtifact, artifactData []byte) []string {
+	var issues []string
+	if bundle.Version != EvidenceBundleVersion {
+		issues = append(issues, fmt.Sprintf("version must be %s", EvidenceBundleVersion))
+	}
+	if bundle.ManifestID != manifest.Task.ID {
+		issues = append(issues, fmt.Sprintf("manifest_id %q does not match manifest task id %q", bundle.ManifestID, manifest.Task.ID))
+	}
+	if !sameStringSet(bundle.SpecsTouched, manifest.Change.SpecsTouched) {
+		issues = append(issues, "specs_touched must match manifest change.specs_touched")
+	}
+	if bundle.ChangeRisk != manifest.Change.Risk {
+		issues = append(issues, fmt.Sprintf("change_risk %q does not match manifest risk %q", bundle.ChangeRisk, manifest.Change.Risk))
+	}
+	if strings.TrimSpace(bundle.Timestamp) == "" {
+		issues = append(issues, "timestamp is required")
+	} else if _, err := time.Parse(time.RFC3339, bundle.Timestamp); err != nil {
+		issues = append(issues, "timestamp must be RFC3339")
+	}
+	issues = append(issues, validateEvidenceBundleArtifact(bundle.Artifact, artifact, artifactData)...)
+	issues = append(issues, validateEvidenceBundleRunner(bundle.Runner, manifest.Agent, artifact)...)
+	return issues
+}
+
+func validateEvidenceBundleArtifact(bundle EvidenceBundleArtifact, artifact EvidenceArtifact, artifactData []byte) []string {
+	var issues []string
+	if bundle.ID != artifact.ID {
+		issues = append(issues, fmt.Sprintf("artifact.id %q does not match manifest artifact id %q", bundle.ID, artifact.ID))
+	}
+	if bundle.Kind != artifact.Kind {
+		issues = append(issues, fmt.Sprintf("artifact.kind %q does not match manifest artifact kind %q", bundle.Kind, artifact.Kind))
+	}
+	if bundle.Path != artifact.Path {
+		issues = append(issues, fmt.Sprintf("artifact.path %q does not match manifest artifact path %q", bundle.Path, artifact.Path))
+	}
+	actualSHA := sha256Hex(artifactData)
+	if !strings.EqualFold(bundle.SHA256, actualSHA) {
+		issues = append(issues, fmt.Sprintf("artifact.sha256 mismatch: expected actual artifact hash %s got %s", actualSHA, bundle.SHA256))
+	}
+	if artifact.SHA256 != "" && !strings.EqualFold(bundle.SHA256, artifact.SHA256) {
+		issues = append(issues, "artifact.sha256 must match manifest artifact sha256")
+	}
+	if bundle.Producer != artifact.Producer {
+		issues = append(issues, fmt.Sprintf("artifact.producer %q does not match manifest artifact producer %q", bundle.Producer, artifact.Producer))
+	}
+	if bundle.Command != artifact.Command {
+		issues = append(issues, fmt.Sprintf("artifact.command %q does not match manifest artifact command %q", bundle.Command, artifact.Command))
+	}
+	if artifact.ExitCode == nil {
+		issues = append(issues, "manifest artifact exit_code is required")
+	} else if bundle.ExitCode != *artifact.ExitCode {
+		issues = append(issues, fmt.Sprintf("artifact.exit_code %d does not match manifest artifact exit_code %d", bundle.ExitCode, *artifact.ExitCode))
+	}
+	if !sameStringSet(bundle.Obligations, artifact.Obligations) {
+		issues = append(issues, "artifact.obligations must match manifest artifact obligations")
+	}
+	return issues
+}
+
+func validateEvidenceBundleRunner(runner EvidenceBundleRunner, agent Agent, artifact EvidenceArtifact) []string {
+	var issues []string
+	if strings.TrimSpace(runner.Identity) == "" {
+		issues = append(issues, "runner.identity is required")
+	} else if runner.Identity != artifact.SignerIdentity {
+		issues = append(issues, fmt.Sprintf("runner.identity %q does not match signer_identity %q", runner.Identity, artifact.SignerIdentity))
+	}
+	if strings.TrimSpace(runner.OIDCIssuer) == "" {
+		issues = append(issues, "runner.oidc_issuer is required")
+	} else if runner.OIDCIssuer != artifact.SignerOIDCIssuer {
+		issues = append(issues, fmt.Sprintf("runner.oidc_issuer %q does not match signer_oidc_issuer %q", runner.OIDCIssuer, artifact.SignerOIDCIssuer))
+	}
+	if agent.RunnerIdentity != "" && runner.Identity != agent.RunnerIdentity {
+		issues = append(issues, fmt.Sprintf("runner.identity %q does not match manifest agent.runner_identity %q", runner.Identity, agent.RunnerIdentity))
+	}
+	if agent.RunnerOIDCIssuer != "" && runner.OIDCIssuer != agent.RunnerOIDCIssuer {
+		issues = append(issues, fmt.Sprintf("runner.oidc_issuer %q does not match manifest agent.runner_oidc_issuer %q", runner.OIDCIssuer, agent.RunnerOIDCIssuer))
+	}
+	if agent.Name != "" && runner.AgentName != agent.Name {
+		issues = append(issues, fmt.Sprintf("runner.agent_name %q does not match manifest agent.name %q", runner.AgentName, agent.Name))
+	}
+	if agent.RunID != "" && runner.AgentRunID != agent.RunID {
+		issues = append(issues, fmt.Sprintf("runner.agent_run_id %q does not match manifest agent.run_id %q", runner.AgentRunID, agent.RunID))
+	}
+	if agent.Model != "" && runner.AgentModel != agent.Model {
+		issues = append(issues, fmt.Sprintf("runner.agent_model %q does not match manifest agent.model %q", runner.AgentModel, agent.Model))
+	}
+	return issues
 }
 
 func (r *ArtifactResult) addIssue(code string, message string) {

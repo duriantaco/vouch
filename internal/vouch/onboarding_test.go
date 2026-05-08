@@ -80,12 +80,14 @@ func TestContractCreateAndManifestCreateMapChangedFilesToOwnedSpec(t *testing.T)
 	spec := createSampleContract(t, repo, RiskHigh)
 
 	manifest, err := CreateManifest(repo, ManifestCreateOptions{
-		TaskID:       "agent-1",
-		Summary:      "change app service",
-		Agent:        "codex",
-		RunID:        "run-1",
-		ChangedFiles: []string{"src/app/service.py", "tests/test_app.py"},
-		Out:          ".vouch/manifests/agent-1.json",
+		TaskID:           "agent-1",
+		Summary:          "change app service",
+		Agent:            "codex",
+		RunID:            "run-1",
+		RunnerIdentity:   "https://github.com/example/repo/.github/workflows/vouch.yml@refs/heads/main",
+		RunnerOIDCIssuer: "https://token.actions.githubusercontent.com",
+		ChangedFiles:     []string{"src/app/service.py", "tests/test_app.py"},
+		Out:              ".vouch/manifests/agent-1.json",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +104,9 @@ func TestContractCreateAndManifestCreateMapChangedFilesToOwnedSpec(t *testing.T)
 	loaded := mustLoadManifest(t, filepath.Join(repo, ".vouch", "manifests", "agent-1.json"))
 	if loaded.Task.ID != "agent-1" {
 		t.Fatalf("manifest was not written: %#v", loaded.Task)
+	}
+	if loaded.Agent.RunnerIdentity == "" || loaded.Agent.RunnerOIDCIssuer == "" {
+		t.Fatalf("manifest did not preserve runner identity: %#v", loaded.Agent)
 	}
 	errors := CompileManifestPipeline(mustLoadSpecs(t, repo), loaded).ManifestErrors
 	if len(errors) != 0 {

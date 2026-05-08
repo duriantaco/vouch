@@ -210,12 +210,14 @@ vouch --repo /path/to/your/repo manifest attach-artifact \
   --out .vouch/manifests/run-123.json
 ```
 
-Signature fields are optional in beta. To attach signed evidence, first sign the
-artifact with cosign, then include the bundle and expected identity when
-attaching it:
+Signature fields are optional in beta. To attach signed evidence, first write a
+`vouch.evidence_bundle.v0` JSON file for the artifact. The bundle binds the
+manifest task, touched specs, artifact ID/kind/path/hash, covered obligation
+IDs, runner identity, and timestamp. Sign that evidence bundle with cosign, then
+include the bundle paths and expected identity when attaching the artifact:
 
 ```sh
-cosign sign-blob .vouch/artifacts/behavior.json \
+cosign sign-blob .vouch/artifacts/behavior.vouch-bundle.json \
   --bundle .vouch/artifacts/behavior.sigstore.json
 
 vouch --repo /path/to/your/repo manifest attach-artifact \
@@ -223,6 +225,7 @@ vouch --repo /path/to/your/repo manifest attach-artifact \
   --id behavior \
   --kind behavior_trace \
   --path .vouch/artifacts/behavior.json \
+  --evidence-bundle .vouch/artifacts/behavior.vouch-bundle.json \
   --signature-bundle .vouch/artifacts/behavior.sigstore.json \
   --signer-identity "https://github.com/ORG/REPO/.github/workflows/vouch.yml@refs/heads/main" \
   --signer-oidc-issuer "https://token.actions.githubusercontent.com" \
@@ -238,9 +241,11 @@ vouch --repo /path/to/your/repo \
   gate --require-signed
 ```
 
-`--require-signed` verifies each evidence artifact with `cosign verify-blob`
+`--require-signed` verifies each `evidence_bundle` with `cosign verify-blob`
 using the artifact's `signature_bundle`, `signer_identity`, and
-`signer_oidc_issuer` fields.
+`signer_oidc_issuer` fields. It also rejects bundles whose manifest identity,
+artifact hash, obligation IDs, runner identity, or runner OIDC issuer do not
+match the manifest and artifact being gated.
 
 ### 7. Gate The Change
 
@@ -322,7 +327,7 @@ Today, Vouch can check:
 - Artifact paths stay inside the repo and files exist.
 - Artifact exit codes are present and zero.
 - Optional artifact SHA-256 values match file contents.
-- Optional `gate --require-signed` mode verifies evidence artifacts with cosign bundles and expected signer identities.
+- Optional `gate --require-signed` mode verifies signed `vouch.evidence_bundle.v0` files and binds manifest identity, artifact hashes, obligation IDs, runner identity, and expected signer metadata.
 - Release policy is loaded from `.vouch/policy/release-policy.json` or an explicit `--policy` file.
 - Generated verifier packets pin prompt and output schema versions.
 - Structured `verifier_output` artifacts parse as `vouch.verifier_output.v0` and import pass/block findings into release policy.
@@ -341,7 +346,7 @@ Today, Vouch cannot check:
 - Whether tests were actually run unless the external runner preserves and signs the artifact chain.
 - Whether product intent was inferred correctly from code.
 - Whether release policy uses a general-purpose policy language such as Rego; the current policy evaluator is a small Vouch JSON rule engine.
-- Whether signed evidence is bound to a canonical bundle that includes manifest identity, artifact hashes, and covered obligation IDs.
+- Whether signer identities are authorized by an organization-level allowlist beyond the identities declared in the manifest artifacts.
 
 ## Validation Status
 
@@ -619,8 +624,8 @@ vouch --manifest FILE plan build --spec FILE --out FILE
 vouch artifacts build --spec FILE --out DIR
 vouch --repo DIR spec lint
 vouch --repo DIR --manifest FILE manifest check
-vouch --repo DIR manifest create --task-id ID --summary TEXT --agent NAME --run-id ID --out FILE
-vouch --repo DIR --manifest FILE manifest attach-artifact --id ID --kind KIND --path FILE --exit-code N [--signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE
+vouch --repo DIR manifest create --task-id ID --summary TEXT --agent NAME --run-id ID [--runner-identity ID --runner-oidc-issuer URL] --out FILE
+vouch --repo DIR --manifest FILE manifest attach-artifact --id ID --kind KIND --path FILE --exit-code N [--evidence-bundle FILE --signature-bundle FILE --signer-identity ID --signer-oidc-issuer URL] --out FILE
 vouch --repo DIR --manifest FILE junit map --junit FILE --test-map FILE --out FILE
 vouch --repo DIR --manifest FILE policy simulate [--policy FILE] [--require-signed]
 vouch --repo DIR --manifest FILE verify [--policy FILE]

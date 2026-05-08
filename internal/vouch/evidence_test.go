@@ -1734,7 +1734,7 @@ func TestRequireSignedBlocksUnsignedArtifacts(t *testing.T) {
 	if evidence.Decision != "block" {
 		t.Fatalf("expected signed-evidence gate to block unsigned artifacts, got %s", evidence.Decision)
 	}
-	if !hasInvalidEvidence(evidence, "behavior-trace", "missing_signature_bundle") {
+	if !hasInvalidEvidence(evidence, "behavior-trace", "missing_evidence_bundle") {
 		t.Fatalf("expected unsigned behavior artifact to be invalid: %#v", evidence.InvalidEvidence)
 	}
 }
@@ -1784,6 +1784,8 @@ func TestRequireSignedRequiresArtifactBackedEvidence(t *testing.T) {
 
 func TestRequireSignedAcceptsCosignVerifiedArtifacts(t *testing.T) {
 	installFakeCosign(t, 0)
+	signerIdentity := "https://github.com/example/repo/.github/workflows/vouch.yml@refs/heads/main"
+	signerOIDCIssuer := "https://token.actions.githubusercontent.com"
 	spec := Spec{
 		Version:    SpecSchemaVersion,
 		ID:         "ui.copy",
@@ -1807,9 +1809,10 @@ func TestRequireSignedAcceptsCosignVerifiedArtifacts(t *testing.T) {
 			Kind:             kind,
 			Producer:         "ci",
 			Path:             path,
+			EvidenceBundle:   "artifacts/" + id + ".vouch-bundle.json",
 			SignatureBundle:  "artifacts/" + id + ".sigstore.json",
-			SignerIdentity:   "https://github.com/example/repo/.github/workflows/vouch.yml@refs/heads/main",
-			SignerOIDCIssuer: "https://token.actions.githubusercontent.com",
+			SignerIdentity:   signerIdentity,
+			SignerOIDCIssuer: signerOIDCIssuer,
 			ExitCode:         exitCode(0),
 			Obligations:      obligations,
 		}
@@ -1822,6 +1825,13 @@ func TestRequireSignedAcceptsCosignVerifiedArtifacts(t *testing.T) {
 			SpecsTouched:    []string{"ui.copy"},
 			BehaviorChanged: true,
 			ChangedFiles:    []string{"src/ui/copy.ts"},
+		},
+		Agent: Agent{
+			Name:             "codex",
+			RunID:            "run-signed",
+			Model:            "gpt-5.2",
+			RunnerIdentity:   signerIdentity,
+			RunnerOIDCIssuer: signerOIDCIssuer,
 		},
 		Verification: Verification{
 			Commands:    []string{"go test ./..."},
@@ -1849,6 +1859,10 @@ func TestRequireSignedAcceptsCosignVerifiedArtifacts(t *testing.T) {
 	for _, artifact := range []string{"behavior", "security", "tests", "runtime", "rollback"} {
 		writeArtifact(t, repo, "artifacts/"+artifact+".sigstore.json", `{"mediaType":"application/vnd.dev.sigstore.bundle+json"}`)
 	}
+	manifest := mustLoadManifest(t, manifestPath)
+	for _, artifact := range manifest.Verification.Artifacts {
+		writeEvidenceBundle(t, repo, artifact.EvidenceBundle, manifest, artifact, nil)
+	}
 	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
 	if err != nil {
 		t.Fatal(err)
@@ -1860,6 +1874,49 @@ func TestRequireSignedAcceptsCosignVerifiedArtifacts(t *testing.T) {
 		if !result.SignatureVerified {
 			t.Fatalf("expected signature verification for artifact %s: %#v", result.ID, evidence.ArtifactResults)
 		}
+		if !result.BundleVerified || !result.HashVerified {
+			t.Fatalf("expected bundle/hash verification for artifact %s: %#v", result.ID, evidence.ArtifactResults)
+		}
+	}
+}
+
+func TestRequireSignedRejectsEvidenceBundleHashMismatch(t *testing.T) {
+	installFakeCosign(t, 0)
+	repo, manifestPath, _ := writeFullyCoveredUIScenario(t, nil)
+	attachSignedBundles(t, repo, manifestPath, func(artifact EvidenceArtifact, bundle *EvidenceBundle) {
+		if artifact.ID == "behavior" {
+			bundle.Artifact.SHA256 = strings.Repeat("0", 64)
+		}
+	})
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected tampered bundle hash to block, got %s", evidence.Decision)
+	}
+	if !hasInvalidEvidence(evidence, "behavior", "evidence_bundle") {
+		t.Fatalf("expected behavior bundle to be invalid: %#v", evidence.InvalidEvidence)
+	}
+}
+
+func TestRequireSignedRejectsRunnerIdentityMismatch(t *testing.T) {
+	installFakeCosign(t, 0)
+	repo, manifestPath, _ := writeFullyCoveredUIScenario(t, nil)
+	attachSignedBundles(t, repo, manifestPath, func(artifact EvidenceArtifact, bundle *EvidenceBundle) {
+		if artifact.ID == "behavior" {
+			bundle.Runner.Identity = "https://github.com/example/repo/.github/workflows/other.yml@refs/heads/main"
+		}
+	})
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected runner identity mismatch to block, got %s", evidence.Decision)
+	}
+	if !hasInvalidEvidence(evidence, "behavior", "evidence_bundle") {
+		t.Fatalf("expected behavior bundle to be invalid: %#v", evidence.InvalidEvidence)
 	}
 }
 
@@ -2068,6 +2125,32 @@ func writeFullyCoveredUIScenario(t *testing.T, extra func(map[ObligationKind]str
 	return repo, manifestPath, ids
 }
 
+func attachSignedBundles(t *testing.T, repo string, manifestPath string, mutate func(EvidenceArtifact, *EvidenceBundle)) {
+	t.Helper()
+	signerIdentity := "https://github.com/example/repo/.github/workflows/vouch.yml@refs/heads/main"
+	signerOIDCIssuer := "https://token.actions.githubusercontent.com"
+	manifest := mustLoadManifest(t, manifestPath)
+	manifest.Agent = Agent{
+		Name:             "codex",
+		RunID:            "run-signed",
+		Model:            "gpt-5.2",
+		RunnerIdentity:   signerIdentity,
+		RunnerOIDCIssuer: signerOIDCIssuer,
+	}
+	for i := range manifest.Verification.Artifacts {
+		id := manifest.Verification.Artifacts[i].ID
+		manifest.Verification.Artifacts[i].EvidenceBundle = "artifacts/" + id + ".vouch-bundle.json"
+		manifest.Verification.Artifacts[i].SignatureBundle = "artifacts/" + id + ".sigstore.json"
+		manifest.Verification.Artifacts[i].SignerIdentity = signerIdentity
+		manifest.Verification.Artifacts[i].SignerOIDCIssuer = signerOIDCIssuer
+	}
+	writeJSON(t, manifestPath, manifest)
+	for _, artifact := range manifest.Verification.Artifacts {
+		writeArtifact(t, repo, artifact.SignatureBundle, `{"mediaType":"application/vnd.dev.sigstore.bundle+json"}`)
+		writeEvidenceBundle(t, repo, artifact.EvidenceBundle, manifest, artifact, mutate)
+	}
+}
+
 func writeScenario(t *testing.T, spec Spec, manifest Manifest) (string, string) {
 	t.Helper()
 	repo := t.TempDir()
@@ -2106,6 +2189,47 @@ func writeArtifact(t *testing.T, repo string, relPath string, data string) {
 func writeVerifierOutputArtifact(t *testing.T, repo string, relPath string, output VerifierOutput) {
 	t.Helper()
 	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeArtifact(t, repo, relPath, string(append(data, '\n')))
+}
+
+func writeEvidenceBundle(t *testing.T, repo string, relPath string, manifest Manifest, artifact EvidenceArtifact, mutate func(EvidenceArtifact, *EvidenceBundle)) {
+	t.Helper()
+	artifactData := mustReadFile(t, filepath.Join(repo, artifact.Path))
+	exitCode := 0
+	if artifact.ExitCode != nil {
+		exitCode = *artifact.ExitCode
+	}
+	bundle := EvidenceBundle{
+		Version:      EvidenceBundleVersion,
+		ManifestID:   manifest.Task.ID,
+		SpecsTouched: append([]string(nil), manifest.Change.SpecsTouched...),
+		ChangeRisk:   manifest.Change.Risk,
+		Artifact: EvidenceBundleArtifact{
+			ID:          artifact.ID,
+			Kind:        artifact.Kind,
+			Path:        artifact.Path,
+			SHA256:      sha256Hex(artifactData),
+			Producer:    artifact.Producer,
+			Command:     artifact.Command,
+			ExitCode:    exitCode,
+			Obligations: append([]string(nil), artifact.Obligations...),
+		},
+		Runner: EvidenceBundleRunner{
+			Identity:   artifact.SignerIdentity,
+			OIDCIssuer: artifact.SignerOIDCIssuer,
+			AgentName:  manifest.Agent.Name,
+			AgentRunID: manifest.Agent.RunID,
+			AgentModel: manifest.Agent.Model,
+		},
+		Timestamp: "2026-05-07T00:00:00Z",
+	}
+	if mutate != nil {
+		mutate(artifact, &bundle)
+	}
+	data, err := json.MarshalIndent(bundle, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
