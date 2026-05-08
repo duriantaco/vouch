@@ -41,6 +41,8 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		return initCommand(absRepo, rest[1:], common.json, stdout, stderr)
 	case "bootstrap":
 		return bootstrapCommand(absRepo, rest[1:], common.json, stdout, stderr)
+	case "compile":
+		return compileCommand(absRepo, rest[1:], common.json, stdout, stderr)
 	case "intent":
 		if len(rest) >= 2 && rest[1] == "parse" {
 			return intentParse(rest[2:], stdout, stderr)
@@ -138,6 +140,43 @@ func bootstrapCommand(repo string, args []string, jsonOut bool, stdout io.Writer
 	if *check && result.NeedsWrite {
 		return 1
 	}
+	return 0
+}
+
+func compileCommand(repo string, args []string, jsonOut bool, stdout io.Writer, stderr io.Writer) int {
+	flags := flag.NewFlagSet("compile", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	emit := flags.String("emit", "", "emit one compiler stage: ast, spec, ir, or plan")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(stderr, "compile: unexpected argument %q\n", flags.Arg(0))
+		return 2
+	}
+	if *emit != "" && *emit != "ast" && *emit != "spec" && *emit != "ir" && *emit != "plan" {
+		fmt.Fprintln(stderr, "compile: --emit must be one of ast, spec, ir, or plan")
+		return 2
+	}
+	output, err := CompileRepo(repo)
+	if err != nil {
+		if diagnosticErr, ok := err.(DiagnosticError); ok {
+			fmt.Fprintln(stderr, "Compile failed:")
+			for _, diagnostic := range diagnosticErr.Diagnostics {
+				fmt.Fprintf(stderr, "- %s\n", FormatDiagnostic(diagnostic))
+			}
+			return 1
+		}
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *emit != "" {
+		return renderCommandJSON(output.EmitArtifact(*emit), stdout, stderr)
+	}
+	if jsonOut {
+		return renderCommandJSON(output.Result, stdout, stderr)
+	}
+	fmt.Fprint(stdout, RenderCompileResult(output.Result))
 	return 0
 }
 
@@ -723,6 +762,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "commands:")
 	fmt.Fprintln(out, "  init [--profile auto|python|node|go|rust|generic] [--force]")
 	fmt.Fprintln(out, "  bootstrap [--dry-run] [--check] [--aggressive]")
+	fmt.Fprintln(out, "  compile [--emit ast|spec|ir|plan]")
 	fmt.Fprintln(out, "  intent parse --intent FILE --out FILE")
 	fmt.Fprintln(out, "  intent compile --intent FILE --out FILE")
 	fmt.Fprintln(out, "  ir build --spec FILE --out FILE")

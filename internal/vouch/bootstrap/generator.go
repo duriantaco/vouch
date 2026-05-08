@@ -92,10 +92,11 @@ func obligationsForDraft(draft Draft, opts Options) []Obligation {
 	}
 	if draft.Risk == "high" && len(obligations) > 0 {
 		source := firstSource(draft.Signals)
+		description := "security-sensitive changes require explicit evidence"
 		obligations = append(obligations, Obligation{
-			ID:          draft.Component + ".security.security_sensitive_change_reviewed",
+			ID:          draft.Component + ".security." + slug(description),
 			Kind:        "security",
-			Description: "security-sensitive changes require explicit evidence",
+			Description: description,
 			Generated:   generated(source),
 		})
 	}

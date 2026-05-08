@@ -804,6 +804,7 @@ func sanitizeContractName(value string) string {
 
 func renderIntentYAML(intent Intent) string {
 	var b bytes.Buffer
+	writeYAMLScalar(&b, "version", IntentSchemaVersion)
 	writeYAMLScalar(&b, "feature", intent.Feature)
 	writeYAMLScalar(&b, "owner", intent.Owner)
 	writeYAMLList(&b, "owned_paths", intent.OwnedPaths)
