@@ -218,11 +218,12 @@ Implemented base:
 - Detached signatures over Vouch evidence bundles.
 - Hardened `gate --require-signed` mode that binds manifest, artifact hashes, and obligation IDs.
 - Tamper-evident evidence bundles.
+- Repo-level allowed signer policy in `.vouch/config.json`.
 - Agent identity and run provenance in bundle validation.
 
 Remaining work:
 
-- Allowed signer policy for contracts or repo policy.
+- Contract- or path-scoped allowed signer policy.
 - Canonical JSON serialization rules for evidence bundles.
 - Signed specs and manifests.
 - Role-based approval exceptions.
@@ -234,7 +235,8 @@ Remaining work:
 
 The next useful contributions are:
 
-- Allowed signer policy for contracts or repo policy.
+- Contract- or path-scoped allowed signer policy.
+- Canonical JSON serialization rules for evidence bundles.
 - Signed specs and manifests.
 - Rego policy adapter decision spike.
 - Reference workflow for `init -> manifest -> pytest -> junit map -> attach -> gate`.

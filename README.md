@@ -214,7 +214,19 @@ Signature fields are optional in beta. To attach signed evidence, first write a
 `vouch.evidence_bundle.v0` JSON file for the artifact. The bundle binds the
 manifest task, touched specs, artifact ID/kind/path/hash, covered obligation
 IDs, runner identity, and timestamp. Sign that evidence bundle with cosign, then
-include the bundle paths and expected identity when attaching the artifact:
+include the bundle paths and expected identity when attaching the artifact.
+The signer must also be listed in `.vouch/config.json`:
+
+```json
+{
+  "allowed_signers": [
+    {
+      "identity": "https://github.com/ORG/REPO/.github/workflows/vouch.yml@refs/heads/main",
+      "oidc_issuer": "https://token.actions.githubusercontent.com"
+    }
+  ]
+}
+```
 
 ```sh
 cosign sign-blob .vouch/artifacts/behavior.vouch-bundle.json \
@@ -245,7 +257,8 @@ vouch --repo /path/to/your/repo \
 using the artifact's `signature_bundle`, `signer_identity`, and
 `signer_oidc_issuer` fields. It also rejects bundles whose manifest identity,
 artifact hash, obligation IDs, runner identity, or runner OIDC issuer do not
-match the manifest and artifact being gated.
+match the manifest and artifact being gated, or whose signer is not present in
+`config.allowed_signers`.
 
 ### 7. Gate The Change
 
@@ -327,7 +340,7 @@ Today, Vouch can check:
 - Artifact paths stay inside the repo and files exist.
 - Artifact exit codes are present and zero.
 - Optional artifact SHA-256 values match file contents.
-- Optional `gate --require-signed` mode verifies signed `vouch.evidence_bundle.v0` files and binds manifest identity, artifact hashes, obligation IDs, runner identity, and expected signer metadata.
+- Optional `gate --require-signed` mode verifies signed `vouch.evidence_bundle.v0` files, binds manifest identity, artifact hashes, obligation IDs, and runner identity, and requires signer metadata to match `config.allowed_signers`.
 - Release policy is loaded from `.vouch/policy/release-policy.json` or an explicit `--policy` file.
 - Generated verifier packets pin prompt and output schema versions.
 - Structured `verifier_output` artifacts parse as `vouch.verifier_output.v0` and import pass/block findings into release policy.
@@ -346,7 +359,7 @@ Today, Vouch cannot check:
 - Whether tests were actually run unless the external runner preserves and signs the artifact chain.
 - Whether product intent was inferred correctly from code.
 - Whether release policy uses a general-purpose policy language such as Rego; the current policy evaluator is a small Vouch JSON rule engine.
-- Whether signer identities are authorized by an organization-level allowlist beyond the identities declared in the manifest artifacts.
+- Whether signer identities should vary by contract owner, path, or risk tier; the current allowlist is repo-level.
 
 ## Validation Status
 

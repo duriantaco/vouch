@@ -33,6 +33,7 @@ func CollectEvidenceWithOptions(repo string, manifestPath string, opts CollectEv
 	if err != nil {
 		return Evidence{}, err
 	}
+	config := LoadConfigOrDefault(absRepo)
 	pipeline := CompileManifestPipeline(specs, manifest)
 	evidence := Evidence{
 		Version:                EvidenceSchemaVersion,
@@ -63,7 +64,10 @@ func CollectEvidenceWithOptions(repo string, manifestPath string, opts CollectEv
 		Reasons:                []string{},
 	}
 	obligationIndex := NewObligationIndex(evidence.VerificationPlans)
-	evidence.ArtifactResults, evidence.InvalidEvidence = LinkEvidenceArtifacts(absRepo, manifest, manifest.Verification.Artifacts, obligationIndex, ArtifactLinkOptions{RequireSigned: opts.RequireSigned})
+	evidence.ArtifactResults, evidence.InvalidEvidence = LinkEvidenceArtifacts(absRepo, manifest, manifest.Verification.Artifacts, obligationIndex, ArtifactLinkOptions{
+		RequireSigned:  opts.RequireSigned,
+		AllowedSigners: config.AllowedSigners,
+	})
 	buildCoverage(&evidence)
 	runVerifiers(&evidence)
 	importVerifierFindings(&evidence)

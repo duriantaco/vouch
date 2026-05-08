@@ -40,6 +40,9 @@ test = { cmd = "pytest" }
 	if config.Version != ConfigSchemaVersion {
 		t.Fatalf("unexpected config version %s", config.Version)
 	}
+	if config.AllowedSigners == nil {
+		t.Fatalf("expected allowed_signers to render as an array, got nil")
+	}
 	if !contains(config.Commands, "fyn run pytest --junitxml .vouch/artifacts/junit.xml") {
 		t.Fatalf("expected pytest command, got %#v", config.Commands)
 	}

@@ -465,13 +465,14 @@ type GateResult struct {
 }
 
 type Config struct {
-	Version      string   `json:"version"`
-	Profiles     []string `json:"profiles"`
-	Commands     []string `json:"commands"`
-	ArtifactDir  string   `json:"artifact_dir"`
-	ManifestDir  string   `json:"manifest_dir"`
-	BuildDir     string   `json:"build_dir"`
-	IgnoredPaths []string `json:"ignored_paths"`
+	Version        string          `json:"version"`
+	Profiles       []string        `json:"profiles"`
+	Commands       []string        `json:"commands"`
+	ArtifactDir    string          `json:"artifact_dir"`
+	ManifestDir    string          `json:"manifest_dir"`
+	BuildDir       string          `json:"build_dir"`
+	IgnoredPaths   []string        `json:"ignored_paths"`
+	AllowedSigners []AllowedSigner `json:"allowed_signers"`
 }
 
 type InitResult struct {
@@ -482,6 +483,11 @@ type InitResult struct {
 	Commands    []string `json:"commands"`
 	CreatedDirs []string `json:"created_dirs"`
 	Created     bool     `json:"created"`
+}
+
+type AllowedSigner struct {
+	Identity   string `json:"identity"`
+	OIDCIssuer string `json:"oidc_issuer"`
 }
 
 type ContractSuggestion struct {
