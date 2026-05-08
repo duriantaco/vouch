@@ -1,0 +1,32 @@
+name: Vouch
+
+on:
+  pull_request:
+
+jobs:
+  vouch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Install Vouch
+        run: go install github.com/duriantaco/vouch/cmd/vouch@latest
+
+      - name: Bootstrap Vouch contracts
+        run: vouch bootstrap --check || vouch bootstrap
+
+      - name: Compile Vouch obligations
+        run: vouch compile
+
+      - name: Run tests
+        run: pytest --junitxml .vouch/artifacts/pytest.xml
+
+      - name: Import JUnit evidence
+        run: vouch evidence import junit .vouch/artifacts/pytest.xml
+
+      - name: Gate PR
+        run: vouch gate --github-summary
