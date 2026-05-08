@@ -1938,6 +1938,63 @@ func TestRequireSignedRejectsSignerOutsideRepoAllowlist(t *testing.T) {
 	}
 }
 
+func TestRequireSignedRejectsEmptySignerAllowlist(t *testing.T) {
+	installFakeCosign(t, 0)
+	repo, manifestPath, _ := writeFullyCoveredUIScenario(t, nil)
+	attachSignedBundles(t, repo, manifestPath, nil)
+	writeAllowedSignerList(t, repo, nil)
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected empty signer allowlist to block, got %s", evidence.Decision)
+	}
+	if !hasInvalidEvidence(evidence, "behavior", "missing_allowed_signers") {
+		t.Fatalf("expected missing allowed signers failure: %#v", evidence.InvalidEvidence)
+	}
+}
+
+func TestRequireSignedRejectsAllowedIdentityWithWrongIssuer(t *testing.T) {
+	installFakeCosign(t, 0)
+	repo, manifestPath, _ := writeFullyCoveredUIScenario(t, nil)
+	attachSignedBundles(t, repo, manifestPath, nil)
+	writeAllowedSigners(t, repo, "https://github.com/example/repo/.github/workflows/vouch.yml@refs/heads/main", "https://issuer.example.invalid")
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected wrong signer issuer to block, got %s", evidence.Decision)
+	}
+	if !hasInvalidEvidence(evidence, "behavior", "signer_not_allowed") {
+		t.Fatalf("expected signer issuer to be rejected: %#v", evidence.InvalidEvidence)
+	}
+}
+
+func TestRequireSignedAcceptsMultiEntryAllowlist(t *testing.T) {
+	installFakeCosign(t, 0)
+	repo, manifestPath, _ := writeFullyCoveredUIScenario(t, nil)
+	attachSignedBundles(t, repo, manifestPath, nil)
+	writeAllowedSignerList(t, repo, []AllowedSigner{
+		{
+			Identity:   "https://github.com/example/repo/.github/workflows/other.yml@refs/heads/main",
+			OIDCIssuer: "https://token.actions.githubusercontent.com",
+		},
+		{
+			Identity:   "https://github.com/example/repo/.github/workflows/vouch.yml@refs/heads/main",
+			OIDCIssuer: "https://token.actions.githubusercontent.com",
+		},
+	})
+	evidence, err := CollectEvidenceWithOptions(repo, manifestPath, CollectEvidenceOptions{RequireSigned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "auto_merge" {
+		t.Fatalf("expected matching signer in multi-entry allowlist to pass, got %s: invalid=%#v", evidence.Decision, evidence.InvalidEvidence)
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -2172,11 +2229,16 @@ func attachSignedBundles(t *testing.T, repo string, manifestPath string, mutate 
 
 func writeAllowedSigners(t *testing.T, repo string, identity string, issuer string) {
 	t.Helper()
-	config := LoadConfigOrDefault(repo)
-	config.AllowedSigners = []AllowedSigner{{
+	writeAllowedSignerList(t, repo, []AllowedSigner{{
 		Identity:   identity,
 		OIDCIssuer: issuer,
-	}}
+	}})
+}
+
+func writeAllowedSignerList(t *testing.T, repo string, signers []AllowedSigner) {
+	t.Helper()
+	config := LoadConfigOrDefault(repo)
+	config.AllowedSigners = append([]AllowedSigner(nil), signers...)
 	configPath := filepath.Join(repo, ".vouch", "config.json")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatal(err)
