@@ -36,12 +36,13 @@ func DefaultConfig(repo string) Config {
 	profiles := DetectProfiles(repo)
 	commands := DetectCommands(repo, profiles)
 	return Config{
-		Version:     ConfigSchemaVersion,
-		Profiles:    profiles,
-		Commands:    commands,
-		ArtifactDir: ".vouch/artifacts",
-		ManifestDir: ".vouch/manifests",
-		BuildDir:    ".vouch/build",
+		Version:        ConfigSchemaVersion,
+		Profiles:       profiles,
+		Commands:       commands,
+		ArtifactDir:    ".vouch/artifacts",
+		ManifestDir:    ".vouch/manifests",
+		BuildDir:       ".vouch/build",
+		AllowedSigners: []AllowedSigner{},
 		IgnoredPaths: []string{
 			".git/**",
 			".vouch/artifacts/**",

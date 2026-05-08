@@ -20,7 +20,8 @@ type ObligationIndex struct {
 }
 
 type ArtifactLinkOptions struct {
-	RequireSigned bool
+	RequireSigned  bool
+	AllowedSigners []AllowedSigner
 }
 
 func NewObligationIndex(plans map[string]VerificationPlan) ObligationIndex {
@@ -88,7 +89,7 @@ func LinkEvidenceArtifacts(repo string, manifest Manifest, artifacts []EvidenceA
 		}
 
 		if opts.RequireSigned && len(data) > 0 {
-			verifySignedEvidenceBundle(repo, manifest, artifact, data, &result)
+			verifySignedEvidenceBundle(repo, manifest, artifact, data, opts.AllowedSigners, &result)
 		}
 
 		if artifact.Kind == EvidenceVerifierOutput {
@@ -139,7 +140,7 @@ func LinkEvidenceArtifacts(repo string, manifest Manifest, artifacts []EvidenceA
 	return results, invalid
 }
 
-func verifySignedEvidenceBundle(repo string, manifest Manifest, artifact EvidenceArtifact, artifactData []byte, result *ArtifactResult) {
+func verifySignedEvidenceBundle(repo string, manifest Manifest, artifact EvidenceArtifact, artifactData []byte, allowedSigners []AllowedSigner, result *ArtifactResult) {
 	if artifact.EvidenceBundle == "" {
 		result.addIssue("missing_evidence_bundle", "evidence_bundle is required when signed evidence is enforced")
 		return
@@ -154,6 +155,14 @@ func verifySignedEvidenceBundle(repo string, manifest Manifest, artifact Evidenc
 	}
 	if artifact.SignerOIDCIssuer == "" {
 		result.addIssue("missing_signer_oidc_issuer", "signer_oidc_issuer is required when signed evidence is enforced")
+		return
+	}
+	if len(allowedSigners) == 0 {
+		result.addIssue("missing_allowed_signers", "config.allowed_signers must list accepted runner identities when signed evidence is enforced")
+		return
+	}
+	if !signerAllowed(allowedSigners, artifact.SignerIdentity, artifact.SignerOIDCIssuer) {
+		result.addIssue("signer_not_allowed", fmt.Sprintf("signer %q with issuer %q is not allowed by config.allowed_signers", artifact.SignerIdentity, artifact.SignerOIDCIssuer))
 		return
 	}
 	evidenceBundlePath, err := resolveArtifactPath(repo, artifact.EvidenceBundle)
@@ -213,6 +222,15 @@ func verifySignedEvidenceBundle(repo string, manifest Manifest, artifact Evidenc
 		return
 	}
 	result.SignatureVerified = true
+}
+
+func signerAllowed(allowed []AllowedSigner, identity string, issuer string) bool {
+	for _, signer := range allowed {
+		if signer.Identity == identity && signer.OIDCIssuer == issuer {
+			return true
+		}
+	}
+	return false
 }
 
 func importEvidenceBundle(data []byte) (EvidenceBundle, []string) {
