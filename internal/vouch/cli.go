@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	bootstrap "vouch/internal/vouch/bootstrap"
 )
 
 func Main(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -37,6 +39,8 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 	switch rest[0] {
 	case "init":
 		return initCommand(absRepo, rest[1:], common.json, stdout, stderr)
+	case "bootstrap":
+		return bootstrapCommand(absRepo, rest[1:], common.json, stdout, stderr)
 	case "intent":
 		if len(rest) >= 2 && rest[1] == "parse" {
 			return intentParse(rest[2:], stdout, stderr)
@@ -94,6 +98,47 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	usage(stderr)
 	return 2
+}
+
+func bootstrapCommand(repo string, args []string, jsonOut bool, stdout io.Writer, stderr io.Writer) int {
+	flags := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dryRun := flags.Bool("dry-run", false, "print generated contract drafts without writing files")
+	check := flags.Bool("check", false, "fail when bootstrap outputs are not up to date")
+	aggressive := flags.Bool("aggressive", false, "draft more obligations from path signals")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(stderr, "bootstrap: unexpected argument %q\n", flags.Arg(0))
+		return 2
+	}
+	if *dryRun && *check {
+		fmt.Fprintln(stderr, "bootstrap: --dry-run and --check cannot be combined")
+		return 2
+	}
+	if !*dryRun && !*check {
+		if _, err := InitRepo(repo, "auto", false); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	result, err := bootstrap.Run(repo, bootstrap.Options{DryRun: *dryRun, Check: *check, Aggressive: *aggressive})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if jsonOut {
+		if code := renderCommandJSON(result, stdout, stderr); code != 0 {
+			return code
+		}
+	} else {
+		fmt.Fprint(stdout, bootstrap.RenderText(result))
+	}
+	if *check && result.NeedsWrite {
+		return 1
+	}
+	return 0
 }
 
 func initCommand(repo string, args []string, jsonOut bool, stdout io.Writer, stderr io.Writer) int {
@@ -677,6 +722,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "")
 	fmt.Fprintln(out, "commands:")
 	fmt.Fprintln(out, "  init [--profile auto|python|node|go|rust|generic] [--force]")
+	fmt.Fprintln(out, "  bootstrap [--dry-run] [--check] [--aggressive]")
 	fmt.Fprintln(out, "  intent parse --intent FILE --out FILE")
 	fmt.Fprintln(out, "  intent compile --intent FILE --out FILE")
 	fmt.Fprintln(out, "  ir build --spec FILE --out FILE")
