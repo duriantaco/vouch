@@ -4,19 +4,239 @@
 
 # Vouch
 
-Vouch is an intent compiler for AI-written code.
+Vouch is a contract-and-evidence release gate for AI-written code.
 
-It drafts conservative release contracts from signals already present in your repo: tests, CODEOWNERS, OpenAPI specs, CI config, and evidence artifacts. It then compiles accepted contracts into machine-checkable obligations and gates releases on linked evidence.
+It does one narrow job: given human-owned intent for a part of a repo, Vouch compiles that intent into machine-checkable obligations, links runner-produced evidence to those obligations, and returns a deterministic release decision: `block`, `human_escalation`, `canary`, or `auto_merge`.
 
-Vouch does not guess your product intent. Humans own intent. `vouch bootstrap` creates contract drafts with provenance so you can accept, edit, or reject them.
+## Contents
 
-## What Vouch Is Today
+- [The Problem](#the-problem)
+- [Why Use It](#why-use-it)
+- [Why Not Just Use Another Agent?](#why-not-just-use-another-agent)
+- [Current Validation](#current-validation)
+- [Real Repo Walkthrough](#real-repo-walkthrough)
+- [Clear Limits](#clear-limits)
+- [Quickstart](#quickstart)
+- [FAQ](#faq)
+- [Project Docs](#project-docs)
+- [Validation Status](#validation-status)
+- [Demo](#demo)
+- [Commands](#commands)
 
-It compiles human-owned intent YAML into typed specs, obligation IR, verification plans, and runner/verifier/release artifacts. It then validates a change manifest and linked evidence artifacts to produce a deterministic release decision: `block`, `human_escalation`, `canary`, or `auto_merge`.
+## The Problem
 
-It is **NOT** a code reviewer. It does not read a diff and decide whether the implementation is good. It does not run your tests today. External runners execute tests, probes, scanners, and deployment checks. Vouch checks whether the resulting evidence maps to the obligations compiled from explicit contracts.
+AI agents can produce code faster than humans can carefully review every line. CI can tell you whether commands passed, but it usually cannot answer the release question that matters for agent changes:
 
-Use it as experimental infrastructure for designing Vouch verification contracts, not as a replacement for production security review, code review, incident response, or human ownership of product intent.
+> For the contracts this change touches, are the required behavior, security, test, runtime, and rollback obligations covered by valid evidence?
+
+Vouch adds that missing control plane. Humans declare what must remain true, existing runners produce evidence, and Vouch checks whether the evidence is complete enough for the repo's release policy.
+
+## Why Use It
+
+Use Vouch when you want:
+
+- Agent changes tied to explicit, human-owned product and release contracts.
+- Passing tests to be necessary but not sufficient for risky changes.
+- Stable obligation IDs that connect intent, changed files, evidence artifacts, and release decisions.
+- A CI-friendly gate that consumes existing JUnit, JSON, text, verifier, metric, and rollback artifacts instead of replacing your runner.
+- Optional signed evidence checks that bind artifacts to approved runner identities.
+
+Do not use Vouch for every small change. For low-risk edits, normal CI and review may be enough. Vouch is useful when the cost of a bad agent change is high enough that "tests passed" and "another agent said it looks fine" are not strong enough release criteria.
+
+## Why Not Just Use Another Agent?
+
+Another agent can review a diff, but it is still an opinion over code. It may miss the same release concerns a human skim misses, and its output is hard to turn into a stable merge rule.
+
+Vouch is different because it asks for explicit release evidence:
+
+| Question | Another Agent | Vouch |
+| --- | --- | --- |
+| Who owns the intended behavior? | Usually inferred from the diff or prompt. | Declared in a human-owned contract. |
+| What must be checked before release? | Whatever the agent decides to inspect. | Compiled into stable obligation IDs. |
+| What happens when tests pass but rollout evidence is missing? | Often depends on reviewer judgment. | Gate blocks or escalates according to policy. |
+| Can the result be audited later? | Usually a prose comment or chat transcript. | Manifest, evidence artifacts, coverage, policy rule, and decision. |
+| Can CI enforce it deterministically? | Not reliably without custom glue. | Yes, `vouch gate` exits non-zero on `block`. |
+
+The benefit is not "more AI review." The benefit is a release boundary that says: for this kind of change, these obligations must have these evidence artifacts, or the change does not ship.
+
+That is also why there are several moving parts:
+
+- contracts define intent
+- compile turns intent into stable obligations
+- runners produce evidence
+- gate checks evidence coverage and policy
+
+You only pay that cost where the release risk justifies it: auth, payments, permissions, data deletion, migrations, external side effects, public APIs, production rollout, and other changes where a vague approval is not enough.
+
+## Current Validation
+
+Vouch includes a repo-local acceptance suite, VouchBench, for the current release-gate behavior. It builds the local CLI, runs isolated fixture repos, and fails non-zero if expected decisions, exit codes, coverage counts, missing obligation IDs, invalid evidence codes, policy rules, manifest/spec errors, or selected artifact statuses regress.
+
+The current VouchBench corpus passes 10/10 scenarios and 114/114 assertions:
+
+| Scenario | Baseline | Expected Vouch Decision | Validation Signal |
+| --- | --- | --- | --- |
+| High-risk auth with JUnit only | tests pass | `block` | Tests alone do not cover behavior, security, runtime, or rollback obligations. |
+| High-risk auth with partial release evidence | tests pass | `block` | Partial artifacts are not enough when compiled obligations remain uncovered. |
+| High-risk auth with full evidence but bad manifest traceability | tests pass | `block` | Full obligation coverage can still block when changed files are not owned by touched specs. |
+| High-risk auth with non-zero test artifact | tests fail | `block` | Artifact exit codes are enforced. This is a negative control tests already catch. |
+| High-risk auth with complete evidence and canary | tests pass | `canary` | Complete evidence routes high-risk auth to canary, not auto-merge. |
+| High-risk auth with complete evidence but no canary | tests pass | `human_escalation` | High-risk complete evidence without canary escalates to a human. |
+| Medium/high platform change across auth, payments, and API with partial evidence | tests pass | `block` | A 25-obligation multi-component release blocks when one high-risk component lacks security, runtime, and rollback evidence. |
+| Medium/high platform change across auth, payments, and API with complete evidence | tests pass | `canary` | A larger multi-component release can pass to canary when all obligations are covered. |
+| Medium-risk API-only change inside the platform repo | tests pass | `auto_merge` | Vouch scopes obligations to the touched medium-risk contract instead of gating the whole repo. |
+| Low-risk docs with complete evidence | tests pass | `auto_merge` | Vouch is not just a blocker. Low-risk complete evidence can pass. |
+
+The generic onboarding flow has also been exercised against temp copies of real Python repos (`sundae`, `sago`, and `wooster`) using `init`, `contract suggest`, `contract create`, `manifest create`, JUnit mapping/import, artifact attachment, and `gate`.
+
+This validation is evidence of deterministic gate behavior over the stated corpus. It does not certify arbitrary code. See [Benchmarks](docs/BENCHMARKS.md) for the harness, assertions, and limits.
+
+## Real Repo Walkthrough
+
+This walkthrough uses [Pallets Click](https://github.com/pallets/click), a widely used Python CLI library. Pallets projects use `pytest` for tests, and Click 8.3.2 declares a `tests` dependency group with `pytest`.
+
+The point of this walkthrough is not to claim Vouch understands Click. The point is to show the whole first-run workflow on a real repository:
+
+```text
+repo -> draft contracts -> compile obligations -> run tests -> import JUnit -> gate
+```
+
+### 1. Clone A Pinned Real Repo
+
+Use a pinned tag so the counts below are reproducible:
+
+```sh
+mkdir -p /tmp/vouch-real-repo
+cd /tmp/vouch-real-repo
+
+git clone --depth 1 --branch 8.3.2 https://github.com/pallets/click.git
+cd click
+```
+
+### 2. Install Test Dependencies
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+
+python -m pip install -U pip
+python -m pip install -e . pytest
+```
+
+### 3. Draft And Compile Vouch Contracts
+
+Run Vouch before running tests so generated `__pycache__` files do not become repo signals.
+
+```sh
+vouch init
+vouch bootstrap --dry-run
+vouch bootstrap
+vouch compile
+```
+
+On Click 8.3.2, `vouch compile` currently produces:
+
+```text
+Compiled 31 contract drafts into 195 obligations.
+```
+
+This means Vouch found repo signals, wrote draft intent files under `.vouch/intents/`, compiled specs under `.vouch/specs/`, and built aggregate obligation IR under `.vouch/build/obligations.ir.json`.
+
+At this point a human should inspect the generated intents. Bootstrap is conservative scaffolding, not product understanding. You should edit owners, risk levels, paths, behavior, security invariants, runtime signals, and rollback expectations before relying on the gate.
+
+### 4. Run The Project Tests With JUnit
+
+```sh
+mkdir -p .vouch/artifacts
+python -m pytest --junitxml .vouch/artifacts/pytest.xml
+```
+
+On one local run against Click 8.3.2, pytest reported:
+
+```text
+1384 passed, 22 skipped, 30000 deselected, 1 xfailed
+```
+
+The exact test count can vary with Python and dependency versions. The important artifact is `.vouch/artifacts/pytest.xml`.
+
+### 5. Import Test Evidence
+
+```sh
+vouch evidence import junit .vouch/artifacts/pytest.xml
+```
+
+On the same Click run, Vouch linked:
+
+```text
+Linked obligations: 51
+```
+
+That means JUnit satisfied 51 required-test obligations. It does not satisfy behavior, security, runtime, or rollback obligations.
+
+### 6. Run The Gate
+
+```sh
+vouch gate
+```
+
+Expected first-run result:
+
+```text
+Release decision: block
+```
+
+That block is expected. It means:
+
+- tests passed
+- Vouch imported test evidence
+- required-test obligations were covered
+- other generated obligations still lack accepted evidence
+
+That is the main difference from plain CI. CI answers "did pytest pass?" Vouch asks "for the contracts touched by this release, are all required evidence classes covered?"
+
+### 7. What You Do Next
+
+For a real adoption pass, do not try to make every generated draft pass blindly. Tighten the contract set:
+
+1. Delete or merge low-value generated intent files.
+2. Assign real owners instead of `unowned`.
+3. Keep contracts that match real release boundaries, for example `click.parser`, `click.termui`, `click.shell_completion`, and `click.testing`.
+4. Replace generated behavior text with human-owned behavior obligations.
+5. Keep required-test obligations mapped to real tests.
+6. Add security, runtime, and rollback evidence only where those obligations matter for the component risk.
+7. Re-run `vouch compile`, `vouch evidence import junit`, and `vouch gate`.
+
+If you only want a non-destructive evaluation of another repo, use the snapshot evaluator from the Vouch checkout:
+
+```sh
+cd /path/to/vouch
+
+scripts/vouchbench-repo.sh \
+  --repo /path/to/repo \
+  --test-command "mkdir -p .vouch/artifacts && python -m pytest --junitxml .vouch/artifacts/pytest.xml" \
+  --junit .vouch/artifacts/pytest.xml \
+  --out /tmp/vouchbench-repo
+```
+
+That copies the target repo into a temp directory and writes Vouch files only inside the snapshot.
+
+## Clear Limits
+
+Vouch is beta infrastructure, not a production-ready assurance system.
+
+It does **not**:
+
+- Review arbitrary diffs or decide whether an implementation is good.
+- Infer product intent automatically. `vouch bootstrap` drafts conservative contracts from repo signals, but humans must accept, edit, or reject them.
+- Run tests, probes, scanners, or deployment checks. External runners produce evidence. Vouch checks how that evidence maps to compiled obligations.
+- Validate a generic JSON or text artifact as truthful beyond structure, status, obligation IDs, path, exit code, optional hash, and optional signature checks.
+- Replace production code review, security review, incident response, rollout ownership, or human ownership of product intent.
+
+## What Vouch Does Today
+
+Vouch drafts conservative release contracts from signals already present in your repo, including tests, CODEOWNERS, OpenAPI specs, CI config, and evidence artifacts. It compiles accepted intent YAML into typed specs, obligation IR, verification plans, and runner/verifier/release artifacts. It then validates a change manifest and linked evidence artifacts to produce a release decision.
+
+Use it today as experimental infrastructure for designing and exercising verification contracts for agent-authored changes.
 
 ## Quickstart
 
@@ -93,7 +313,7 @@ This creates:
 vouch --repo /path/to/your/repo contract suggest --json
 ```
 
-Pick one suggestion as a starting point. Vouch suggestions are structural; you still need to write the real product intent.
+Pick one suggestion as a starting point. Vouch suggestions are structural. You still need to write the real product intent.
 
 ### 3. Create A Contract
 
@@ -337,6 +557,8 @@ vouch --repo /path/to/your/repo \
 
 - [Roadmap](ROADMAP.md) explains where the project is going and what remains before this can be production infrastructure.
 - [Comparison](COMPARISON.md) explains how Vouch composes with Sigstore, SLSA, in-toto, OPA, and Conftest.
+- [Benchmarks](docs/BENCHMARKS.md) explains the repo-local VouchBench harness, assertions, and current validation scope.
+- `scripts/vouchbench-repo.sh --repo /path/to/repo` runs a non-destructive Vouch evaluation against an external repo snapshot.
 - [Contributing](CONTRIBUTING.md) explains how to help and which areas need work.
 
 The problem it attempts to solve is:
@@ -355,7 +577,7 @@ Vouch's answer is:
 8. Deterministic evidence checks
 9. Release decision
 
-The output is not generated product code, and it is not proof that the implementation is correct. The output is an auditable answer to a narrower question. For the contracts this change claims to touch, are the required obligations covered by evidence artifacts that pass Vouch's current checks?
+The output is not generated product code, and it does not certify that the implementation is correct. The output is an auditable answer to a narrower question. For the contracts this change claims to touch, are the required obligations covered by evidence artifacts that pass Vouch's current checks?
 
 ## Current Assurance Level
 
@@ -387,10 +609,18 @@ Today, Vouch cannot check:
 - Whether a generic JSON/text artifact is truthful beyond its structure, IDs, status, path, exit code, and optional hash.
 - Whether tests were actually run unless the external runner preserves and signs the artifact chain.
 - Whether product intent was inferred correctly from code.
-- Whether release policy uses a general-purpose policy language such as Rego; the current policy evaluator is a small Vouch JSON rule engine.
-- Whether signer identities should vary by contract owner, path, or risk tier; the current allowlist is repo-level.
+- Whether release policy uses a general-purpose policy language such as Rego. The current policy evaluator is a small Vouch JSON rule engine.
+- Whether signer identities should vary by contract owner, path, or risk tier. The current allowlist is repo-level.
 
 ## Validation Status
+
+For repeatable local validation, run:
+
+```sh
+scripts/vouchbench.sh
+```
+
+That harness compares baseline outcomes with Vouch's gate decision across fixed scenarios. The current corpus checks missing release evidence, manifest traceability, invalid artifact exit codes, high-risk canary routing, high-risk human escalation, and low-risk auto-merge. See [Benchmarks](docs/BENCHMARKS.md) for the exact scenarios, assertions, and limits.
 
 The generic flow has been validated against temp copies of real Python repos:
 
@@ -402,7 +632,7 @@ The generic flow has been validated against temp copies of real Python repos:
 
 Those runs exercised `init`, `contract suggest`, `contract create`, `manifest create`, `manifest check`, `junit map`, `manifest attach-artifact`, and `gate`.
 
-This validates the generic workflow plumbing. It does not prove Vouch understands those products automatically. Vouch still needs human-owned contracts; suggestions are structural starting points based on repo shape and ownership paths.
+This validates the generic workflow plumbing. It does not mean Vouch understands those products automatically. Vouch still needs human-owned contracts. Suggestions are structural starting points based on repo shape and ownership paths.
 
 ## What This Solves
 
@@ -546,7 +776,7 @@ The demo uses a synthetic high-risk `auth.password_reset` change because it exer
 - Feature-flag rollback.
 - Email side effects.
 
-The demo exercises the compiler plumbing and failure modes. It does not prove Vouch can infer or verify password reset correctness from application code.
+The demo exercises the compiler plumbing and failure modes. It does not mean Vouch can infer or verify password reset correctness from application code.
 
 Run the repo-level compiler pipeline:
 
@@ -706,6 +936,83 @@ vouch --repo DIR --manifest FILE evidence [--policy FILE]
 ```
 
 `--json` emits machine-readable evidence for commands that collect evidence. For `gate`, `--json` emits the compact gate result to stdout and `--out FILE` writes the same gate-result shape as a JSON artifact.
+
+## FAQ
+
+### Why is this more complicated than normal CI?
+
+Because Vouch is checking a different thing. CI usually answers whether commands passed. Vouch asks whether the change has the required evidence for the contracts it touches. That needs contracts, compiled obligations, evidence artifacts, and policy.
+
+For low-risk changes, this ceremony may not be worth it. For auth, payments, permissions, migrations, public APIs, external side effects, and production rollout, the extra structure is the point.
+
+### Why not just ask another agent to review the code?
+
+An agent review is still an opinion over a diff. Vouch produces a deterministic gate result from declared obligations and evidence artifacts. You can audit which obligation was required, which artifact covered it, which policy rule fired, and why the gate returned `block`, `human_escalation`, `canary`, or `auto_merge`.
+
+### Does Vouch replace tests?
+
+No. Tests are one evidence source. Vouch consumes test output, currently JUnit, and checks whether it covers required-test obligations. It does not run your test suite itself.
+
+### Why did `vouch gate` block even though tests passed?
+
+Usually because JUnit only covers required-test obligations. Behavior, security, runtime, and rollback obligations require their own accepted evidence. That is expected on a first run.
+
+### Does Vouch infer product intent from code?
+
+No. `vouch bootstrap` drafts conservative contracts from repo signals such as tests, paths, CODEOWNERS, and CI files. Humans still own the intent and must accept, edit, merge, or delete generated contracts.
+
+### What do I have to write myself?
+
+You need to review or write the release contract:
+
+- component ownership
+- risk level
+- behavior obligations
+- security invariants
+- required tests
+- runtime signals
+- rollback expectations
+
+Bootstrap can create a starting point, but the contract is only useful once a human makes it match the product.
+
+### What is the first useful adoption step?
+
+Pick one high-risk component instead of trying to cover the whole repo. Good first targets are auth, billing, permissions, data deletion, migrations, public APIs, and deployment-critical code.
+
+Create or edit one contract, map its required tests, run JUnit import, and let `vouch gate` show which evidence is still missing.
+
+### Is Vouch production-ready?
+
+No. Treat it as beta infrastructure for experimenting with contract/evidence release gates. It is not a replacement for code review, security review, incident response, or production ownership.
+
+### What does VouchBench actually validate?
+
+VouchBench validates deterministic release-gate behavior over a fixed corpus. It checks expected decisions, exit codes, coverage counts, missing obligations, invalid evidence, policy rules, and manifest/spec errors.
+
+It does not validate arbitrary product correctness.
+
+### Can I run it against my own repo without modifying it?
+
+Yes:
+
+```sh
+scripts/vouchbench-repo.sh --repo /path/to/repo --out /tmp/vouchbench-repo
+```
+
+That copies your repo into a temp snapshot and runs Vouch there.
+
+### What should I look at after bootstrap?
+
+Start with:
+
+```text
+.vouch/intents/*.yaml
+.vouch/build/obligations.ir.json
+.vouch/build/verification-plan.json
+.vouch/evidence/manifest.json
+```
+
+The intent files are the human-editable contract drafts. The IR and plan show what Vouch will require. The evidence manifest shows which test artifacts linked to which obligations.
 
 ## Test
 
