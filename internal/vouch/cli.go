@@ -37,6 +37,8 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 	}
 	switch rest[0] {
+	case "try":
+		return tryCommand(absRepo, rest[1:], common.json, stdout, stderr)
 	case "init":
 		return initCommand(absRepo, rest[1:], common.json, stdout, stderr)
 	case "bootstrap":
@@ -111,6 +113,9 @@ func bootstrapCommand(repo string, args []string, jsonOut bool, stdout io.Writer
 	dryRun := flags.Bool("dry-run", false, "print generated contract drafts without writing files")
 	check := flags.Bool("check", false, "fail when bootstrap outputs are not up to date")
 	aggressive := flags.Bool("aggressive", false, "draft more obligations from path signals")
+	review := flags.Bool("review", false, "print a ranked short list of contract drafts")
+	reviewLimit := flags.Int("limit", 8, "maximum drafts to show with --review")
+	reviewAll := flags.Bool("all", false, "show every draft with --review")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -122,16 +127,32 @@ func bootstrapCommand(repo string, args []string, jsonOut bool, stdout io.Writer
 		fmt.Fprintln(stderr, "bootstrap: --dry-run and --check cannot be combined")
 		return 2
 	}
-	if !*dryRun && !*check {
+	if (*reviewLimit != 8 || *reviewAll) && !*review {
+		fmt.Fprintln(stderr, "bootstrap: --limit and --all require --review")
+		return 2
+	}
+	if *review && *check {
+		fmt.Fprintln(stderr, "bootstrap: --review and --check cannot be combined")
+		return 2
+	}
+	if !*dryRun && !*check && !*review {
 		if _, err := InitRepo(repo, "auto", false); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
 	}
-	result, err := bootstrap.Run(repo, bootstrap.Options{DryRun: *dryRun, Check: *check, Aggressive: *aggressive})
+	result, err := bootstrap.Run(repo, bootstrap.Options{DryRun: *dryRun || *review, Check: *check, Aggressive: *aggressive})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	if *review {
+		reviewResult := bootstrap.BuildReview(result, bootstrap.ReviewOptions{Limit: *reviewLimit, All: *reviewAll})
+		if jsonOut {
+			return renderCommandJSON(reviewResult, stdout, stderr)
+		}
+		fmt.Fprint(stdout, bootstrap.RenderReview(reviewResult))
+		return 0
 	}
 	if jsonOut {
 		if code := renderCommandJSON(result, stdout, stderr); code != 0 {
@@ -746,11 +767,15 @@ func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.
 	gateOut := ""
 	requireSigned := false
 	githubSummary := false
+	verbose := false
+	explain := false
 	policyPath := flags.String("policy", "", "release policy path")
 	if mode == "gate" {
 		flags.StringVar(&gateOut, "out", "", "path to write compact gate result JSON")
 		flags.BoolVar(&requireSigned, "require-signed", false, "require cosign-verified evidence artifacts")
 		flags.BoolVar(&githubSummary, "github-summary", false, "append a Markdown gate summary to GITHUB_STEP_SUMMARY")
+		flags.BoolVar(&verbose, "verbose", false, "print detailed component-level gate output")
+		flags.BoolVar(&explain, "explain", false, "include evidence type explanations in human gate output")
 	}
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -798,7 +823,11 @@ func collectAndRender(repo string, manifestPath string, jsonOut bool, stdout io.
 	} else {
 		switch mode {
 		case "gate":
-			fmt.Fprint(stdout, RenderGate(evidence))
+			if verbose {
+				fmt.Fprint(stdout, RenderGateVerbose(evidence))
+			} else {
+				fmt.Fprint(stdout, RenderGateWithOptions(evidence, GateRenderOptions{Explain: explain}))
+			}
 		default:
 			fmt.Fprint(stdout, RenderEvidence(evidence))
 		}
@@ -816,8 +845,9 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "usage: vouch [--repo DIR] [--manifest FILE] [--json] <command>")
 	fmt.Fprintln(out, "")
 	fmt.Fprintln(out, "commands:")
+	fmt.Fprintln(out, "  try [--junit FILE] [--test-command CMD] [--write] [--keep]")
 	fmt.Fprintln(out, "  init [--profile auto|python|node|go|rust|generic] [--force]")
-	fmt.Fprintln(out, "  bootstrap [--dry-run] [--check] [--aggressive]")
+	fmt.Fprintln(out, "  bootstrap [--dry-run] [--check] [--aggressive] [--review [--limit N|--all]]")
 	fmt.Fprintln(out, "  compile [--emit ast|spec|ir|plan]")
 	fmt.Fprintln(out, "  intent parse --intent FILE --out FILE")
 	fmt.Fprintln(out, "  intent compile --intent FILE --out FILE")
@@ -834,7 +864,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  policy simulate [--manifest FILE] [--policy FILE] [--require-signed]")
 	fmt.Fprintln(out, "  evidence import junit [--out FILE] FILE")
 	fmt.Fprintln(out, "  verify [--policy FILE]")
-	fmt.Fprintln(out, "  gate [--policy FILE] [--out FILE] [--github-summary] [--require-signed]")
+	fmt.Fprintln(out, "  gate [--policy FILE] [--out FILE] [--github-summary] [--require-signed] [--verbose] [--explain]")
 	fmt.Fprintln(out, "  evidence [--policy FILE]")
 }
 

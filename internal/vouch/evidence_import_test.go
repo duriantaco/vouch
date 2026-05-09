@@ -52,18 +52,51 @@ func TestEvidenceImportJUnitAndManifestlessGate(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
+		"BLOCKED",
 		"Release decision: block",
-		"Component:",
-		"auth.password_reset",
 		"Covered:",
-		"required_test.token_expiry",
+		"required_test: 1",
 		"Missing:",
-		"security.security_sensitive_changes_require_explicit_evidence",
-		"accepted evidence: security_check",
+		"security_check: 1",
+		"Why:",
+		"tests cover required-test obligations only",
+		"Next:",
+		"Review .vouch/intents/auth.password_reset.yaml",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected gate output to contain %q, got:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "Component:") {
+		t.Fatalf("default gate output should stay concise, got:\n%s", out)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"--repo", repo, "gate", "--verbose"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected verbose gate to block missing non-JUnit evidence: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	out = stdout.String()
+	for _, want := range []string{
+		"Component:",
+		"auth.password_reset",
+		"security.security_sensitive_changes_require_explicit_evidence",
+		"accepted evidence: security_check",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected verbose gate output to contain %q, got:\n%s", want, out)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"--repo", repo, "gate", "--explain"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected explained gate to block missing non-JUnit evidence: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Evidence types:") || !strings.Contains(stdout.String(), "security_check: security review") {
+		t.Fatalf("expected gate --explain to include evidence type help, got:\n%s", stdout.String())
 	}
 }
 

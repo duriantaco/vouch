@@ -3,6 +3,7 @@ package vouch
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -24,6 +25,71 @@ func RenderVerification(evidence Evidence) string {
 }
 
 func RenderGate(evidence Evidence) string {
+	return RenderGateWithOptions(evidence, GateRenderOptions{})
+}
+
+type GateRenderOptions struct {
+	Explain bool
+}
+
+func RenderGateWithOptions(evidence Evidence, opts GateRenderOptions) string {
+	covered, total := obligationCoverageCounts(evidence)
+	var b strings.Builder
+	b.WriteString(gateDecisionTitle(evidence.Decision))
+	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "Release decision: %s\n", evidence.Decision)
+	fmt.Fprintf(&b, "Obligations: %d/%d covered\n", covered, total)
+	if evidence.PolicyResult.FiredPolicyRule != "" {
+		fmt.Fprintf(&b, "Policy rule: %s\n", evidence.PolicyResult.FiredPolicyRule)
+	}
+
+	b.WriteString("\nCovered:\n")
+	writeKindCounts(&b, obligationKindCounts(evidence.CoveredObligations), []string{
+		string(ObligationRequiredTest),
+		string(ObligationBehavior),
+		string(ObligationSecurity),
+		string(ObligationRuntimeSignal),
+		string(ObligationRollback),
+	})
+
+	b.WriteString("\nMissing:\n")
+	writeKindCounts(&b, evidenceKindCounts(evidence.MissingObligations), []string{
+		string(EvidenceBehaviorTrace),
+		string(EvidenceSecurityCheck),
+		string(EvidenceRuntimeMetric),
+		string(EvidenceRollbackPlan),
+		string(EvidenceTestCoverage),
+		string(EvidenceVerifierOutput),
+	})
+
+	why := gateWhyLines(evidence)
+	if len(why) > 0 {
+		b.WriteString("\nWhy:\n")
+		for _, line := range why {
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
+	}
+
+	next := gateNextSteps(evidence)
+	if len(next) > 0 {
+		b.WriteString("\nNext:\n")
+		for i, step := range next {
+			fmt.Fprintf(&b, "  %d. %s\n", i+1, step)
+		}
+	}
+
+	if opts.Explain {
+		b.WriteString("\nEvidence types:\n")
+		b.WriteString("  test_coverage: JUnit or mapped test results for required-test obligations\n")
+		b.WriteString("  behavior_trace: evidence that user-visible behavior still matches the contract\n")
+		b.WriteString("  security_check: security review, scanner, or verifier evidence for security obligations\n")
+		b.WriteString("  runtime_metric: metric or alert evidence for runtime obligations\n")
+		b.WriteString("  rollback_plan: rollback strategy or artifact for release recovery\n")
+	}
+	return b.String()
+}
+
+func RenderGateVerbose(evidence Evidence) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Release decision: %s\n", evidence.Decision)
 	for _, reason := range evidence.Reasons {
@@ -46,6 +112,145 @@ func RenderGate(evidence Evidence) string {
 		}
 	}
 	return b.String()
+}
+
+func gateDecisionTitle(decision string) string {
+	switch decision {
+	case "block":
+		return "BLOCKED"
+	case "auto_merge":
+		return "AUTO_MERGE"
+	case "human_escalation":
+		return "HUMAN_ESCALATION"
+	case "canary":
+		return "CANARY"
+	default:
+		return strings.ToUpper(decision)
+	}
+}
+
+func obligationKindCounts(items map[string][]Obligation) map[string]int {
+	counts := map[string]int{}
+	for _, specID := range sortedRenderKeys(items) {
+		for _, obligation := range items[specID] {
+			counts[string(obligation.Kind)]++
+		}
+	}
+	return counts
+}
+
+func evidenceKindCounts(items map[string][]Obligation) map[string]int {
+	counts := map[string]int{}
+	for _, specID := range sortedRenderKeys(items) {
+		for _, obligation := range items[specID] {
+			counts[string(obligation.RequiredEvidence)]++
+		}
+	}
+	return counts
+}
+
+func writeKindCounts(b *strings.Builder, counts map[string]int, order []string) {
+	wrote := false
+	for _, key := range order {
+		count := counts[key]
+		if count == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "  %s: %d\n", key, count)
+		wrote = true
+	}
+	for _, key := range sortedStringKeys(counts) {
+		if containsString(order, key) || counts[key] == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "  %s: %d\n", key, counts[key])
+		wrote = true
+	}
+	if !wrote {
+		b.WriteString("  none\n")
+	}
+}
+
+func gateWhyLines(evidence Evidence) []string {
+	var lines []string
+	lines = append(lines, evidence.Reasons...)
+	if hasCoveredEvidenceKind(evidence, EvidenceTestCoverage) && hasMissingNonTestEvidence(evidence) {
+		lines = append(lines, "tests cover required-test obligations only")
+		lines = append(lines, "missing behavior/security/runtime/rollback evidence can still block release")
+	}
+	if len(evidence.InvalidEvidence) > 0 {
+		lines = append(lines, "one or more evidence artifacts were invalid")
+	}
+	return uniqueStrings(lines)
+}
+
+func gateNextSteps(evidence Evidence) []string {
+	var steps []string
+	if specID := firstMissingSpec(evidence); specID != "" {
+		steps = append(steps, "Review "+filepath.ToSlash(filepath.Join(".vouch", "intents", specID+".yaml")))
+	}
+	for _, kind := range firstMissingEvidenceKinds(evidence, 2) {
+		steps = append(steps, "Attach "+kind+" evidence")
+	}
+	if len(steps) > 0 {
+		steps = append(steps, "Re-run vouch gate")
+	}
+	return steps
+}
+
+func firstMissingSpec(evidence Evidence) string {
+	keys := sortedRenderKeys(evidence.MissingObligations)
+	for _, key := range keys {
+		if len(evidence.MissingObligations[key]) > 0 {
+			return key
+		}
+	}
+	return ""
+}
+
+func firstMissingEvidenceKinds(evidence Evidence, limit int) []string {
+	counts := evidenceKindCounts(evidence.MissingObligations)
+	order := []string{
+		string(EvidenceBehaviorTrace),
+		string(EvidenceSecurityCheck),
+		string(EvidenceRuntimeMetric),
+		string(EvidenceRollbackPlan),
+		string(EvidenceTestCoverage),
+		string(EvidenceVerifierOutput),
+	}
+	var kinds []string
+	for _, kind := range order {
+		if counts[kind] == 0 {
+			continue
+		}
+		kinds = append(kinds, kind)
+		if len(kinds) >= limit {
+			return kinds
+		}
+	}
+	return kinds
+}
+
+func hasCoveredEvidenceKind(evidence Evidence, kind EvidenceKind) bool {
+	for _, specID := range sortedRenderKeys(evidence.CoveredObligations) {
+		for _, obligation := range evidence.CoveredObligations[specID] {
+			if obligation.RequiredEvidence == kind {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasMissingNonTestEvidence(evidence Evidence) bool {
+	for _, specID := range sortedRenderKeys(evidence.MissingObligations) {
+		for _, obligation := range evidence.MissingObligations[specID] {
+			if obligation.RequiredEvidence != EvidenceTestCoverage {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func RenderGitHubSummary(evidence Evidence) string {
