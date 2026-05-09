@@ -98,7 +98,7 @@ This walkthrough uses [Pallets Click](https://github.com/pallets/click), a widel
 The point of this walkthrough is not to claim Vouch understands Click. The point is to show the whole first-run workflow on a real repository:
 
 ```text
-repo -> draft contracts -> compile obligations -> run tests -> import JUnit -> gate
+repo -> preview draft contracts -> write accepted drafts -> run tests -> import JUnit -> gate
 ```
 
 ### 1. Clone A Pinned Real Repo
@@ -123,18 +123,25 @@ python -m pip install -U pip
 python -m pip install -e . pytest
 ```
 
-### 3. Draft And Compile Vouch Contracts
+### 3. Preview Vouch Without Writing Files
 
 Run Vouch before running tests so generated `__pycache__` files do not become repo signals.
 
 ```sh
-vouch init
-vouch bootstrap --dry-run
-vouch bootstrap
-vouch compile
+vouch try --repo .
 ```
 
-On Click 8.3.2, `vouch compile` currently produces:
+This prints a short first-run report with draft count, compiled obligation count, risky drafts to review, and next steps. It uses a temporary snapshot, so the Click checkout is not changed.
+
+### 4. Write And Compile Vouch Drafts
+
+When the preview looks useful:
+
+```sh
+vouch try --repo . --write
+```
+
+On Click 8.3.2, the write run currently compiles:
 
 ```text
 Compiled 31 contract drafts into 195 obligations.
@@ -144,7 +151,13 @@ This means Vouch found repo signals, wrote draft intent files under `.vouch/inte
 
 At this point a human should inspect the generated intents. Bootstrap is conservative scaffolding, not product understanding. You should edit owners, risk levels, paths, behavior, security invariants, runtime signals, and rollback expectations before relying on the gate.
 
-### 4. Run The Project Tests With JUnit
+For a ranked shortlist:
+
+```sh
+vouch bootstrap --review
+```
+
+### 5. Run The Project Tests With JUnit
 
 ```sh
 mkdir -p .vouch/artifacts
@@ -159,7 +172,7 @@ On one local run against Click 8.3.2, pytest reported:
 
 The exact test count can vary with Python and dependency versions. The important artifact is `.vouch/artifacts/pytest.xml`.
 
-### 5. Import Test Evidence
+### 6. Import Test Evidence
 
 ```sh
 vouch evidence import junit .vouch/artifacts/pytest.xml
@@ -173,7 +186,7 @@ Linked obligations: 51
 
 That means JUnit satisfied 51 required-test obligations. It does not satisfy behavior, security, runtime, or rollback obligations.
 
-### 6. Run The Gate
+### 7. Run The Gate
 
 ```sh
 vouch gate
@@ -182,7 +195,16 @@ vouch gate
 Expected first-run result:
 
 ```text
+BLOCKED
+
 Release decision: block
+Obligations: 51/195 covered
+
+Missing:
+  behavior_trace: ...
+  security_check: ...
+  runtime_metric: ...
+  rollback_plan: ...
 ```
 
 That block is expected. It means:
@@ -194,7 +216,7 @@ That block is expected. It means:
 
 That is the main difference from plain CI. CI answers "did pytest pass?" Vouch asks "for the contracts touched by this release, are all required evidence classes covered?"
 
-### 7. What You Do Next
+### 8. What You Do Next
 
 For a real adoption pass, do not try to make every generated draft pass blindly. Tighten the contract set:
 
@@ -206,7 +228,13 @@ For a real adoption pass, do not try to make every generated draft pass blindly.
 6. Add security, runtime, and rollback evidence only where those obligations matter for the component risk.
 7. Re-run `vouch compile`, `vouch evidence import junit`, and `vouch gate`.
 
-If you only want a non-destructive evaluation of another repo, use the snapshot evaluator from the Vouch checkout:
+If you only want a non-destructive evaluation of another repo, prefer `vouch try`:
+
+```sh
+vouch try --repo /path/to/repo
+```
+
+For benchmark-style output from the Vouch checkout, use the snapshot evaluator:
 
 ```sh
 cd /path/to/vouch
@@ -256,10 +284,10 @@ Or, from the Vouch checkout:
 go install ./cmd/vouch
 ```
 
-After that, use `vouch` directly:
+After that, try Vouch on a repo without writing anything into it:
 
 ```sh
-vouch --repo /path/to/your/repo init
+vouch try --repo /path/to/your/repo
 ```
 
 If your shell cannot find `vouch`, make sure Go's bin directory is on `PATH`:
@@ -270,14 +298,35 @@ export PATH="$(go env GOPATH)/bin:$PATH"
 
 If you are developing Vouch itself and do not want to install the binary, replace `vouch` with `go run ./cmd/vouch` in the commands below.
 
-Fast v0.2 flow:
+The first command runs against a temporary snapshot. It shows what contracts Vouch would draft, which risky areas it found, and what to review first.
+
+When the preview looks useful, write the draft Vouch files intentionally:
 
 ```sh
-vouch bootstrap
-vouch compile
+vouch try --repo /path/to/your/repo --write
+```
+
+Then run tests and gate:
+
+```sh
+cd /path/to/your/repo
 pytest --junitxml .vouch/artifacts/pytest.xml
 vouch evidence import junit .vouch/artifacts/pytest.xml
 vouch gate
+```
+
+If you want Vouch to run the test command inside the temporary snapshot, use:
+
+```sh
+vouch try --repo /path/to/your/repo \
+  --test-command "pytest --junitxml .vouch/artifacts/pytest.xml" \
+  --junit .vouch/artifacts/pytest.xml
+```
+
+For a short ranked list of generated drafts:
+
+```sh
+vouch bootstrap --review
 ```
 
 The mental model:
@@ -289,12 +338,20 @@ The mental model:
 | Evidence | `.vouch/artifacts/*` | Test/probe/scanner output that covers compiled obligation IDs. |
 | Gate result | command output or `.vouch/build/gate-result.json` | Vouch's decision for that manifest. |
 
-### 1. Initialize Vouch In Your Repo
-
-Run `vouch` from anywhere and point `--repo` at the repo you want to protect:
+### 1. Preview Vouch Without Writing Files
 
 ```sh
-vouch --repo /path/to/your/repo init
+vouch try --repo /path/to/your/repo
+```
+
+Default `try` mode snapshots the repo first. Your source repo is not changed.
+
+### 2. Write Drafts Into Your Repo
+
+Run this only after the preview looks useful:
+
+```sh
+vouch try --repo /path/to/your/repo --write
 ```
 
 This creates:
@@ -307,15 +364,17 @@ This creates:
 - `.vouch/artifacts/`
 - `.vouch/build/`
 
-### 2. Ask Vouch What Contract To Start With
+It also drafts `.vouch/intents/*.yaml` from repo signals and compiles them into specs and obligation IR.
+
+### 3. Ask Vouch What Contract To Start With
 
 ```sh
-vouch --repo /path/to/your/repo contract suggest --json
+vouch --repo /path/to/your/repo bootstrap --review
 ```
 
-Pick one suggestion as a starting point. Vouch suggestions are structural. You still need to write the real product intent.
+Pick one high-risk or medium-risk draft as a starting point. Vouch drafts are structural. You still need to write the real product intent.
 
-### 3. Create A Contract
+### 4. Create Or Edit A Contract
 
 A contract says what a part of the repo owns and what evidence must exist before changes to that area can ship.
 
@@ -354,7 +413,7 @@ Open `.vouch/build/app.service.ir.json` and look for `obligations[].id`. Example
 - `app.service.runtime_signal.app_service_requests`
 - `app.service.rollback.revert_change`
 
-### 4. Create A Manifest For The Agent Change
+### 5. Create A Manifest For The Agent Change
 
 The manifest says what changed and which contract the change touches. You can pass changed files explicitly:
 
@@ -386,7 +445,7 @@ vouch --repo /path/to/your/repo \
 
 That failure is useful. It tells you which obligations still need evidence.
 
-### 5. Run Your Existing Checks
+### 6. Run Your Existing Checks
 
 Vouch does not run your tests yet. Your runner still does that.
 
@@ -421,7 +480,7 @@ Save artifacts under `.vouch/artifacts/`.
 
 If an artifact does not include the exact obligation ID, Vouch will not count it as coverage.
 
-### 6. Attach Evidence
+### 7. Attach Evidence
 
 Attach behavior, security, test, runtime, and rollback evidence as needed. The artifact kind must match the obligation kind.
 `verifier_output` artifacts are the exception: they may reference any compiled obligation, import structured verifier findings, and do not satisfy required evidence coverage by themselves.
@@ -509,7 +568,7 @@ artifact hash, obligation IDs, runner identity, or runner OIDC issuer do not
 match the manifest and artifact being gated, or whose signer is not present in
 `config.allowed_signers`.
 
-### 7. Gate The Change
+### 8. Gate The Change
 
 ```sh
 vouch --repo /path/to/your/repo \
@@ -913,8 +972,9 @@ The command writes to `$GITHUB_STEP_SUMMARY` and still exits non-zero when the r
 ## Commands
 
 ```sh
+vouch try --repo DIR [--junit FILE] [--test-command CMD] [--write] [--keep]
 vouch --repo DIR init
-vouch --repo DIR bootstrap
+vouch --repo DIR bootstrap [--dry-run] [--check] [--aggressive] [--review [--limit N|--all]]
 vouch --repo DIR compile [--emit ast|spec|ir|plan]
 vouch --repo DIR contract suggest
 vouch --repo DIR contract create --name ID --owner OWNER --risk RISK --paths GLOB --behavior TEXT --required-test TEXT
@@ -931,7 +991,7 @@ vouch --repo DIR --manifest FILE junit map --junit FILE --test-map FILE --out FI
 vouch --repo DIR evidence import junit [--out FILE] FILE
 vouch --repo DIR --manifest FILE policy simulate [--policy FILE] [--require-signed]
 vouch --repo DIR --manifest FILE verify [--policy FILE]
-vouch --repo DIR --manifest FILE gate [--policy FILE] [--out FILE] [--github-summary] [--require-signed]
+vouch --repo DIR --manifest FILE gate [--policy FILE] [--out FILE] [--github-summary] [--require-signed] [--verbose] [--explain]
 vouch --repo DIR --manifest FILE evidence [--policy FILE]
 ```
 
@@ -944,6 +1004,18 @@ vouch --repo DIR --manifest FILE evidence [--policy FILE]
 Because Vouch is checking a different thing. CI usually answers whether commands passed. Vouch asks whether the change has the required evidence for the contracts it touches. That needs contracts, compiled obligations, evidence artifacts, and policy.
 
 For low-risk changes, this ceremony may not be worth it. For auth, payments, permissions, migrations, public APIs, external side effects, and production rollout, the extra structure is the point.
+
+### Why does `vouch try` use a snapshot?
+
+First runs should be safe. By default, `vouch try --repo PATH` copies tracked and unignored files into a temporary directory, drafts contracts there, compiles them, and prints a report. Your source repo is not changed.
+
+### What does `vouch try --write` do?
+
+It runs the same first-run pipeline directly in the source repo. Use it when the preview looks useful and you are ready to create `.vouch/` files.
+
+### How do I choose the first contract to review?
+
+Run `vouch bootstrap --review`. Start with one high-risk or medium-risk draft that matches a real release boundary. Good first targets are auth, billing, permissions, migrations, public APIs, and deployment-critical code.
 
 ### Why not just ask another agent to review the code?
 
