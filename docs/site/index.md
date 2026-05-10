@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/vouch.png" alt="Vouch logo" width="220">
-</p>
-
 # Vouch
 
 Vouch is a compiler for release contracts.
@@ -49,53 +45,15 @@ vouch gate
 JUnit covers required-test obligations only. Behavior, security, runtime, and
 rollback obligations need their own evidence.
 
-## Install
-
-```sh
-go install github.com/duriantaco/vouch/cmd/vouch@latest
-```
-
-From this checkout:
-
-```sh
-go install ./cmd/vouch
-```
-
-## Docs
-
-Published docs:
-
-https://duriantaco.github.io/vouch/
-
-The site is deployed from `.github/workflows/pages.yml` after changes land on
-`main`. The source lives in `docs/site/` and is built with MkDocs.
-
-- [Compiler Architecture](docs/COMPILER.md)
-- [GitHub Actions](docs/GITHUB_ACTIONS.md)
-- [Benchmarks](docs/BENCHMARKS.md)
-- [Comparison](COMPARISON.md)
-- [Roadmap](ROADMAP.md)
-- [Contributing](CONTRIBUTING.md)
-
 ## Status
 
 Vouch is beta infrastructure. It is ready for shadow-mode pilots, not blind
 production enforcement.
 
 The local VouchBench harness proves the current compiler/evidence/policy path is
-deterministic over fixture scenarios. It does not prove arbitrary code is correct
-or that real teams will adopt the workflow.
+deterministic over fixture scenarios. It does not prove arbitrary code is
+correct or that real teams will adopt the workflow.
 
 ```sh
 scripts/vouchbench.sh
 ```
-
-## Development
-
-```sh
-GOCACHE=/private/tmp/vouch-gocache go test ./...
-```
-
-## License
-
-Apache-2.0. See [LICENSE](LICENSE).

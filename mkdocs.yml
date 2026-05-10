@@ -1,0 +1,34 @@
+site_name: Vouch
+site_url: https://duriantaco.github.io/vouch/
+repo_url: https://github.com/duriantaco/vouch
+repo_name: duriantaco/vouch
+docs_dir: docs/site
+site_dir: _site
+
+theme:
+  name: material
+  logo: assets/vouch.png
+  favicon: assets/vouch.png
+  palette:
+    scheme: default
+    primary: white
+    accent: teal
+  features:
+    - navigation.sections
+    - navigation.tabs
+    - content.code.copy
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Compiler: compiler.md
+  - GitHub Actions: github-actions.md
+  - Benchmarks: benchmarks.md
