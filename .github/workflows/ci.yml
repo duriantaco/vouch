@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "Go files need gofmt:"
+            echo "$files"
+            exit 1
+          fi
+
+      - name: Check module tidiness
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Run tests
+        run: go test ./...
+
+  vouchbench:
+    name: VouchBench acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run VouchBench
+        run: scripts/vouchbench.sh --out /tmp/vouchbench
+
+      - name: Add benchmark summary
+        if: always()
+        run: |
+          if [ -f /tmp/vouchbench/vouchbench.latest.md ]; then
+            cat /tmp/vouchbench/vouchbench.latest.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vouchbench-results
+          path: /tmp/vouchbench
+          if-no-files-found: ignore
+
+  skylos:
+    name: Skylos advisory
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Skylos
+        continue-on-error: true
+        run: python -m pip install --upgrade skylos
+
+      - name: Run advisory scan
+        continue-on-error: true
+        run: |
+          skylos . \
+            --all \
+            --severity high \
+            --github \
+            --summary \
+            --sarif skylos.sarif.json \
+            --no-upload \
+            --force \
+            --limit 50
+
+      - name: Upload Skylos SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skylos-sarif
+          path: skylos.sarif.json
+          if-no-files-found: ignore

@@ -23,6 +23,10 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Skylos local scanner cache
+.skylos/cache/
+skylos.sarif.json
+
 # Local env files
 .env
 .env.*

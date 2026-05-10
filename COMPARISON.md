@@ -4,9 +4,10 @@ Vouch should be honest about where it fits. It is not a replacement for
 Sigstore, SLSA, in-toto, OPA, or Conftest. The defensible position is that
 Vouch is an obligation-oriented control plane that can compose with those tools.
 
-One-sentence version: Vouch turns human-owned product intent into obligation IDs
-and evidence requirements, then uses supply-chain identity, policy engines, and
-runner artifacts to decide whether an agent change can ship.
+One-sentence version: Vouch is the layer between "tests passed" and "ship it"
+for AI-written code; it maps the contract a change touched to the exact evidence
+required to release it, then composes with supply-chain identity, policy engines,
+and runner artifacts to decide whether the change can ship.
 
 ## What Existing Tools Cover
 
