@@ -16,9 +16,6 @@ jobs:
       - name: Install Vouch
         run: go install github.com/duriantaco/vouch/cmd/vouch@latest
 
-      - name: Bootstrap Vouch contracts
-        run: vouch bootstrap --check || vouch bootstrap
-
       - name: Compile Vouch obligations
         run: vouch compile
 
@@ -29,4 +26,11 @@ jobs:
         run: vouch evidence import junit .vouch/artifacts/pytest.xml
 
       - name: Gate PR
-        run: vouch gate --github-summary
+        continue-on-error: true
+        run: vouch gate --github-summary --out .vouch/build/gate-result.json
+
+      - name: Upload Vouch result
+        uses: actions/upload-artifact@v4
+        with:
+          name: vouch-gate-result
+          path: .vouch/build/gate-result.json

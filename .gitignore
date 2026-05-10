@@ -3,6 +3,7 @@
 
 # Local scratch output
 /tmp/
+/_site/
 
 # Vouch output when dogfooding this repo itself
 /.vouch/build/
