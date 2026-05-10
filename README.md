@@ -4,9 +4,37 @@
 
 # Vouch
 
-Vouch is a contract-and-evidence release gate for AI-written code.
+Vouch keeps risky AI-written changes from shipping just because the tests passed.
 
-It does one narrow job: given human-owned intent for a part of a repo, Vouch compiles that intent into machine-checkable obligations, links runner-produced evidence to those obligations, and returns a deterministic release decision: `block`, `human_escalation`, `canary`, or `auto_merge`.
+It lets a team say, in code, what must remain true for important parts of a
+repo, then requires evidence for those obligations before an agent change can
+merge or release.
+
+In one sentence: Vouch turns human-owned release intent into stable obligation
+IDs, checks runner artifacts against those obligations, and returns a
+deterministic decision: `block`, `human_escalation`, `canary`, or `auto_merge`.
+
+## The Short Version
+
+Use Vouch when "CI passed" is too weak for agent-authored changes.
+
+Example: an agent changes password reset. The unit tests pass. That still does
+not prove the change preserved the intended behavior, avoided logging reset
+tokens, exposed the right runtime signal, and has a rollback path.
+
+With Vouch:
+
+1. A human-owned contract says what `auth.password_reset` is responsible for.
+2. Vouch compiles that contract into stable behavior, security, test, runtime,
+   and rollback obligation IDs.
+3. Existing runners produce JUnit, scanner, probe, metric, verifier, or rollback
+   artifacts.
+4. Vouch links those artifacts to the obligation IDs and applies release policy.
+5. CI gets an auditable decision instead of a vague "looks good."
+
+The value is not more AI review. The value is a deterministic release boundary:
+for the contract this change touched, the required evidence exists or the change
+does not ship.
 
 ## Contents
 
@@ -25,21 +53,31 @@ It does one narrow job: given human-owned intent for a part of a repo, Vouch com
 
 ## The Problem
 
-AI agents can produce code faster than humans can carefully review every line. CI can tell you whether commands passed, but it usually cannot answer the release question that matters for agent changes:
+AI agents can produce code faster than humans can carefully review every line.
+CI can tell you whether commands passed, but it usually cannot answer the
+release question that matters for agent changes:
 
 > For the contracts this change touches, are the required behavior, security, test, runtime, and rollback obligations covered by valid evidence?
 
-Vouch adds that missing control plane. Humans declare what must remain true, existing runners produce evidence, and Vouch checks whether the evidence is complete enough for the repo's release policy.
+Vouch adds that missing control plane. Humans declare what must remain true,
+existing runners produce evidence, and Vouch checks whether the evidence is
+complete enough for the repo's release policy.
 
 ## Why Use It
 
 Use Vouch when you want:
 
-- Agent changes tied to explicit, human-owned product and release contracts.
-- Passing tests to be necessary but not sufficient for risky changes.
-- Stable obligation IDs that connect intent, changed files, evidence artifacts, and release decisions.
-- A CI-friendly gate that consumes existing JUnit, JSON, text, verifier, metric, and rollback artifacts instead of replacing your runner.
-- Optional signed evidence checks that bind artifacts to approved runner identities.
+- A hard rule that risky agent changes need evidence, not just passing tests or
+  another model's approval.
+- Human-owned product and release contracts for repo areas such as auth,
+  payments, permissions, data deletion, migrations, public APIs, and production
+  rollout.
+- Stable obligation IDs that connect intent, changed files, evidence artifacts,
+  policy, and release decisions.
+- A CI-friendly gate that consumes existing JUnit, JSON, text, verifier, metric,
+  and rollback artifacts instead of replacing your runner.
+- Optional signed evidence checks that bind artifacts to approved runner
+  identities.
 
 Do not use Vouch for every small change. For low-risk edits, normal CI and review may be enough. Vouch is useful when the cost of a bad agent change is high enough that "tests passed" and "another agent said it looks fine" are not strong enough release criteria.
 
@@ -57,7 +95,8 @@ Vouch is different because it asks for explicit release evidence:
 | Can the result be audited later? | Usually a prose comment or chat transcript. | Manifest, evidence artifacts, coverage, policy rule, and decision. |
 | Can CI enforce it deterministically? | Not reliably without custom glue. | Yes, `vouch gate` exits non-zero on `block`. |
 
-The benefit is not "more AI review." The benefit is a release boundary that says: for this kind of change, these obligations must have these evidence artifacts, or the change does not ship.
+The benefit is a release boundary that says: for this kind of change, these
+obligations must have these evidence artifacts, or the change does not ship.
 
 That is also why there are several moving parts:
 
