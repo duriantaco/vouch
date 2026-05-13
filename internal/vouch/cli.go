@@ -330,7 +330,7 @@ func manifestCreate(repo string, args []string, jsonOut bool, stdout io.Writer, 
 	model := flags.String("model", "", "agent model")
 	runnerIdentity := flags.String("runner-identity", "", "expected runner identity for signed evidence")
 	runnerOIDCIssuer := flags.String("runner-oidc-issuer", "", "expected runner OIDC issuer for signed evidence")
-	base := flags.String("base", "main", "git base ref")
+	base := flags.String("base", "", "git base ref; auto-detected when omitted")
 	head := flags.String("head", "HEAD", "git head ref")
 	risk := flags.String("risk", "", "risk override")
 	outPath := flags.String("out", "", "manifest output path")

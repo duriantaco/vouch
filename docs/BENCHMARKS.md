@@ -54,10 +54,10 @@ scripts/vouchbench-repo.sh \
   --out /tmp/vouchbench-repo
 ```
 
-For a repo like `/Users/oha/skylos`, start non-destructively:
+For an external repo, start non-destructively:
 
 ```sh
-scripts/vouchbench-repo.sh --repo /Users/oha/skylos --out /tmp/vouchbench-skylos
+scripts/vouchbench-repo.sh --repo /path/to/repo --out /tmp/vouchbench-repo
 ```
 
 That run answers different questions from the fixture acceptance suite:

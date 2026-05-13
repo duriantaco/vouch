@@ -75,6 +75,7 @@ The site is deployed from `.github/workflows/pages.yml` after changes land on
 - [Benchmarks](docs/BENCHMARKS.md)
 - [Comparison](COMPARISON.md)
 - [Roadmap](ROADMAP.md)
+- [Agent/product operating brief](skills.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Status
@@ -93,7 +94,7 @@ scripts/vouchbench.sh
 ## Development
 
 ```sh
-GOCACHE=/private/tmp/vouch-gocache go test ./...
+go test ./...
 ```
 
 ## License

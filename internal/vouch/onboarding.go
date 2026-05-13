@@ -460,6 +460,10 @@ func AttachArtifact(repo string, opts AttachArtifactOptions) (Manifest, Evidence
 	if len(covered) == 0 {
 		return Manifest{}, EvidenceArtifact{}, fmt.Errorf("artifact covers no %q obligations: %s", opts.Kind, strings.Join(issues, "; "))
 	}
+	artifactSHA256 := opts.SHA256
+	if artifactSHA256 == "" {
+		artifactSHA256 = sha256Hex(data)
+	}
 	producer := opts.Producer
 	if producer == "" {
 		producer = manifest.Agent.Name
@@ -473,7 +477,7 @@ func AttachArtifact(repo string, opts AttachArtifactOptions) (Manifest, Evidence
 		Producer:         producer,
 		Command:          opts.Command,
 		Path:             artifactPath,
-		SHA256:           opts.SHA256,
+		SHA256:           artifactSHA256,
 		EvidenceBundle:   opts.EvidenceBundle,
 		SignatureBundle:  opts.SignatureBundle,
 		SignerIdentity:   opts.SignerIdentity,
@@ -846,7 +850,11 @@ func writeYAMLList(b *bytes.Buffer, key string, values []string) {
 
 func gitChangedFiles(repo string, base string, head string) ([]string, error) {
 	if base == "" {
-		base = "main"
+		var err error
+		base, err = defaultGitBaseRef(repo)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if head == "" {
 		head = "HEAD"
@@ -868,6 +876,35 @@ func gitChangedFiles(repo string, base string, head string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+func defaultGitBaseRef(repo string) (string, error) {
+	if base := strings.TrimSpace(os.Getenv("VOUCH_BASE_REF")); base != "" {
+		return base, nil
+	}
+	if base := strings.TrimSpace(os.Getenv("GITHUB_BASE_REF")); base != "" {
+		return base, nil
+	}
+	if base, ok := gitOutput(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); ok {
+		return base, nil
+	}
+	if base, ok := gitOutput(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); ok {
+		return base, nil
+	}
+	return "", errors.New("cannot auto-detect git base ref; pass --base or --changed-file explicitly")
+}
+
+func gitOutput(repo string, args ...string) (string, bool) {
+	gitArgs := append([]string{"-C", repo}, args...)
+	out, err := exec.Command("git", gitArgs...).Output()
+	if err != nil {
+		return "", false
+	}
+	value := strings.TrimSpace(string(out))
+	if value == "" {
+		return "", false
+	}
+	return value, true
 }
 
 func normalizeChangedFiles(files []string) []string {
