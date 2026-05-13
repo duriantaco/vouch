@@ -162,10 +162,9 @@ func artifactCoverageByKind(artifacts []ArtifactResult) map[EvidenceKind]map[str
 
 func importVerifierFindings(evidence *Evidence) {
 	for _, result := range evidence.ArtifactResults {
-		if result.VerifierOutput == nil {
-			continue
+		if result.VerifierOutput != nil {
+			evidence.VerifierOutputs = append(evidence.VerifierOutputs, *result.VerifierOutput)
 		}
-		evidence.VerifierOutputs = append(evidence.VerifierOutputs, *result.VerifierOutput)
 		evidence.Findings = append(evidence.Findings, result.VerifierFindings...)
 	}
 }

@@ -46,8 +46,9 @@ vouch evidence import junit .vouch/artifacts/pytest.xml
 vouch gate
 ```
 
-JUnit covers required-test obligations only. Behavior, security, runtime, and
-rollback obligations need their own evidence.
+JUnit covers required-test obligations only. `security_check` artifacts can use
+SARIF 2.1.0 when scanner rules or results reference exact obligation IDs.
+Behavior, runtime, and rollback obligations need their own evidence.
 
 ## Install
 

@@ -1026,6 +1026,86 @@ func TestGenericArtifactRequiresExactObligationTokens(t *testing.T) {
 	}
 }
 
+func TestSARIFSecurityEvidenceCoversReferencedObligation(t *testing.T) {
+	repo, manifestPath, ids := writeFullyCoveredUIScenario(t, nil)
+	securityID := ids[ObligationSecurity]
+	manifest := mustLoadManifest(t, manifestPath)
+	setArtifactPath(t, &manifest, "security", "artifacts/security.sarif")
+	writeJSON(t, manifestPath, manifest)
+	writeSARIFArtifact(t, repo, "artifacts/security.sarif", sarifSecurityLog(securityID, nil))
+
+	evidence, err := CollectEvidence(repo, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "auto_merge" {
+		t.Fatalf("expected SARIF security evidence to pass, got %s: findings=%#v invalid=%#v", evidence.Decision, evidence.Findings, evidence.InvalidEvidence)
+	}
+	if !artifactCovered(evidence, "security", securityID) {
+		t.Fatalf("expected SARIF artifact to cover security obligation: %#v", evidence.ArtifactResults)
+	}
+	if hasInvalidEvidence(evidence, "security", "sarif_import") {
+		t.Fatalf("expected SARIF artifact to import cleanly: %#v", evidence.InvalidEvidence)
+	}
+}
+
+func TestSARIFHighSecurityFindingBlocks(t *testing.T) {
+	repo, manifestPath, ids := writeFullyCoveredUIScenario(t, nil)
+	securityID := ids[ObligationSecurity]
+	manifest := mustLoadManifest(t, manifestPath)
+	setArtifactPath(t, &manifest, "security", "artifacts/security.sarif")
+	writeJSON(t, manifestPath, manifest)
+	writeSARIFArtifact(t, repo, "artifacts/security.sarif", sarifSecurityLog(
+		"rules.no-hardcoded-secret",
+		map[string]any{
+			"severity":          "warning",
+			"tags":              []string{securityID},
+			"security-severity": "8.2",
+		},
+		sarifFindingResult("rules.no-hardcoded-secret", "warning", "hardcoded secret in changed file"),
+	))
+
+	evidence, err := CollectEvidence(repo, manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Decision != "block" {
+		t.Fatalf("expected high SARIF finding to block, got %s", evidence.Decision)
+	}
+	if artifactCovered(evidence, "security", securityID) {
+		t.Fatalf("expected blocked SARIF obligation to remain uncovered: %#v", evidence.ArtifactResults)
+	}
+	if !hasFinding(evidence, "sarif", "semgrep reported high-severity finding rules.no-hardcoded-secret") {
+		t.Fatalf("expected imported SARIF finding: %#v", evidence.Findings)
+	}
+	if !contains(evidence.PolicyResult.RulesFired, "block_verifier_findings") {
+		t.Fatalf("expected policy to block on SARIF finding: %#v", evidence.PolicyResult)
+	}
+}
+
+func TestSARIFRequiresExactObligationIDs(t *testing.T) {
+	data, err := json.Marshal(sarifSecurityLog("rules.near-match", map[string]any{
+		"tags": []string{"obligation.one_extra"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	covered, findings, issues := importSARIFEvidence(data, []string{"obligation.one"}, ObligationIndex{
+		ByID: map[string]Obligation{
+			"obligation.one": {ID: "obligation.one"},
+		},
+	})
+	if len(covered) != 0 {
+		t.Fatalf("expected near-match SARIF reference not to cover, got %#v", covered)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("expected no finding for unmapped SARIF result, got %#v", findings)
+	}
+	if !containsSubstring(issues, "SARIF does not reference obligation obligation.one") {
+		t.Fatalf("expected exact-ID issue, got %#v", issues)
+	}
+}
+
 func TestJUnitErrorsAndSkipsInvalidateArtifact(t *testing.T) {
 	covered, failed, issues := importJUnitEvidence([]byte(`<?xml version="1.0" encoding="UTF-8"?>
 <testsuite name="suite" tests="3" failures="0" errors="1" skipped="1">
@@ -2289,6 +2369,44 @@ func writeVerifierOutputArtifact(t *testing.T, repo string, relPath string, outp
 		t.Fatal(err)
 	}
 	writeArtifact(t, repo, relPath, string(append(data, '\n')))
+}
+
+func writeSARIFArtifact(t *testing.T, repo string, relPath string, log map[string]any) {
+	t.Helper()
+	data, err := json.MarshalIndent(log, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeArtifact(t, repo, relPath, string(append(data, '\n')))
+}
+
+func sarifSecurityLog(ruleID string, properties map[string]any, results ...map[string]any) map[string]any {
+	rule := map[string]any{"id": ruleID}
+	if len(properties) > 0 {
+		rule["properties"] = properties
+	}
+	return map[string]any{
+		"version": sarifVersion,
+		"runs": []any{map[string]any{
+			"tool": map[string]any{
+				"driver": map[string]any{
+					"name":  "semgrep",
+					"rules": []any{rule},
+				},
+			},
+			"results": results,
+		}},
+	}
+}
+
+func sarifFindingResult(ruleID string, level string, message string) map[string]any {
+	return map[string]any{
+		"ruleId": ruleID,
+		"level":  level,
+		"message": map[string]any{
+			"text": message,
+		},
+	}
 }
 
 func writeEvidenceBundle(t *testing.T, repo string, relPath string, manifest Manifest, artifact EvidenceArtifact, mutate func(EvidenceArtifact, *EvidenceBundle)) {

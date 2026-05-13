@@ -1012,6 +1012,9 @@ func importArtifactCoverage(data []byte, kind EvidenceKind, candidateObligations
 		covered, _, issues := importJUnitEvidence(data, candidateObligations)
 		return covered, issues
 	}
+	if kind == EvidenceSecurityCheck && sarifLooksLike(data) {
+		return importSARIFReferences(data, candidateObligations)
+	}
 	return importGenericEvidence(data, candidateObligations)
 }
 

@@ -113,6 +113,13 @@ func LinkEvidenceArtifacts(repo string, manifest Manifest, artifacts []EvidenceA
 					result.addIssue("junit_import", issue)
 				}
 			}
+		} else if artifact.Kind == EvidenceSecurityCheck && len(data) > 0 && sarifLooksLike(data) {
+			covered, findings, issues := importSARIFEvidence(data, artifact.Obligations, index)
+			result.CoveredObligations = covered
+			result.VerifierFindings = findings
+			for _, issue := range issues {
+				result.addIssue("sarif_import", issue)
+			}
 		} else if len(data) > 0 {
 			covered, issues := importGenericEvidence(data, artifact.Obligations)
 			result.CoveredObligations = covered

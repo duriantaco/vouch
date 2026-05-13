@@ -110,3 +110,11 @@ The current decisions are:
 - `auto_merge`
 
 `gate` exits non-zero only when the final decision is `block`.
+
+## Evidence Model
+
+Manifest-backed `security_check` artifacts can be generic exact-ID JSON or
+SARIF 2.1.0 scanner logs. SARIF rules and result properties must reference exact
+compiled obligation IDs. High or critical mapped SARIF results enter the normal
+blocking finding and policy path; unmapped scanner output does not satisfy a
+contract obligation.
