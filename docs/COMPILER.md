@@ -165,6 +165,11 @@ vouch --repo DIR gate
 JUnit covers `required_test` obligations only. Missing behavior, security,
 runtime, or rollback evidence can still block.
 
+`security_check` artifacts can also be SARIF 2.1.0 logs. Vouch treats SARIF as
+scanner evidence only when rules or result properties reference exact compiled
+obligation IDs. High or critical mapped SARIF results become blocking findings;
+unmapped scanner output is not treated as contract evidence.
+
 ## What Is Proven
 
 The repo-local benchmark is VouchBench:

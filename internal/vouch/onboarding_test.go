@@ -235,6 +235,40 @@ func TestAttachArtifactInfersCoveredObligations(t *testing.T) {
 	}
 }
 
+func TestAttachArtifactInfersSARIFSecurityObligations(t *testing.T) {
+	repo := initializedRepo(t)
+	spec := createSampleContract(t, repo, RiskMedium)
+	_, err := CreateManifest(repo, ManifestCreateOptions{
+		TaskID:       "agent-1",
+		Summary:      "change app service",
+		Agent:        "codex",
+		RunID:        "run-1",
+		ChangedFiles: []string{"src/app/service.py"},
+		Out:          ".vouch/manifests/agent-1.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	securityID := obligationID(t, spec, ObligationSecurity, "project paths stay inside repo")
+	writeSARIFArtifact(t, repo, ".vouch/artifacts/security.sarif", sarifSecurityLog(securityID, nil))
+
+	_, artifact, err := AttachArtifact(repo, AttachArtifactOptions{
+		ManifestPath: ".vouch/manifests/agent-1.json",
+		ID:           "security",
+		Kind:         EvidenceSecurityCheck,
+		Path:         ".vouch/artifacts/security.sarif",
+		Command:      "semgrep scan --sarif",
+		ExitCode:     0,
+		Out:          ".vouch/manifests/agent-1.with-security.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(artifact.Obligations, securityID) {
+		t.Fatalf("expected inferred SARIF obligation %s, got %#v", securityID, artifact.Obligations)
+	}
+}
+
 func TestAttachArtifactRejectsNonZeroExitAndPathEscape(t *testing.T) {
 	repo := initializedRepo(t)
 	createSampleContract(t, repo, RiskMedium)

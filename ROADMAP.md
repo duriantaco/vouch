@@ -60,6 +60,7 @@ Implemented today:
 - Manifest creation from changed files and owned paths.
 - Artifact attachment with obligation inference.
 - JUnit test-map adapter for raw pytest-style JUnit evidence.
+- SARIF 2.1.0 import for `security_check` evidence with exact obligation-ID mapping.
 - Machine-readable gate result artifact output for status checks.
 - Release policy files loaded from `.vouch/policy/release-policy.json`.
 - Policy simulation command with structured policy input/output.
@@ -200,7 +201,6 @@ Planned work:
 - Typed API/signature obligation suggestions.
 - Coverage report import.
 - Static analysis import.
-- SARIF import.
 - Secret scanning import.
 - Logging and PII scanner import.
 - Migration and external-effect detectors.
