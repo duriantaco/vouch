@@ -84,18 +84,29 @@ It does not yet prove that Vouch understands arbitrary product intent. The contr
 
 ## Execution Order
 
-The trust and policy work should move earlier than the original phase order.
-Until evidence is provenance-bound and policy is inspectable, workflow polish and
-AI verifier layers are easy to bypass or hard to reason about.
+Use [`skills.md`](skills.md) as the operating brief for choosing work. The
+direction is compiler/evidence control plane, not AI code review.
+
+The next product risk is adoption proof: teams need to see Vouch catch
+release-readiness gaps in a normal pull-request workflow without pretending to
+judge arbitrary implementation correctness. Trust and policy hardening still
+matter, but they should support real evidence workflows rather than lead the
+roadmap by themselves.
 
 Near-term execution order:
 
-1. Tamper-evident evidence and runner identity.
-2. Policy files and policy simulation.
-3. Positioning and comparison artifacts.
-4. Contract-generation paths that reduce authoring cost.
-5. Reproducible case studies that show Vouch catching realistic regressions.
-6. AI evidence verifiers only after signed evidence and policy semantics exist.
+1. Shadow-mode pull-request pilot package.
+2. Evidence connector wedge: SARIF/Semgrep import and coverage import.
+3. Reproducible case study where tests pass but Vouch blocks or routes because
+   release obligations are missing, invalid, or out of scope.
+4. Artifact upload conventions and auditable gate output for PR workflows.
+5. Trust hardening that supports evidence workflows: required high-risk hashes,
+   commit/runner provenance, scoped signers, and signed specs or manifests.
+6. JSON schemas and compatibility tests for public artifacts.
+7. Policy profile expansion or Rego adapter once the policy input shape proves
+   stable.
+8. AI evidence verifiers only after evidence provenance and policy semantics are
+   solid.
 
 ## Roadmap Phases
 
@@ -235,18 +246,21 @@ Remaining work:
 
 The next useful contributions are:
 
+- Static-analysis/SARIF importer for security and quality evidence.
+- Coverage XML importer for required-test and behavior evidence.
+- Shadow-mode GitHub PR workflow with artifact upload conventions.
+- Real-world case study showing a plausible bad agent change blocked by an obligation.
+- Reference workflow for `try -> write -> manifest -> attach evidence -> gate`.
+- Test-map discovery to reduce manual required-test mapping.
+- Required hashes for high-risk evidence artifacts.
+- Commit SHA and runner provenance binding for evidence artifacts.
 - Contract- or path-scoped allowed signer policy.
 - Canonical JSON serialization rules for evidence bundles.
 - Signed specs and manifests.
-- Rego policy adapter decision spike.
-- Reference workflow for `init -> manifest -> pytest -> junit map -> attach -> gate`.
-- Real-world case study showing a plausible bad agent change blocked by an obligation.
-- Test-map discovery to reduce manual required-test mapping.
-- OpenAPI-to-contract stub generation.
-- Coverage XML importer for required-test and behavior evidence.
-- Static-analysis/SARIF importer for security and quality evidence.
 - JSON schemas plus compatibility tests for AST, spec, IR, plan, manifest, and evidence.
 - Golden diagnostics for parser and compiler failures.
+- OpenAPI-to-contract stub generation.
+- Rego policy adapter decision spike.
 - More demo scenarios beyond password reset, including ordinary library changes.
 
 ## Productionization Track

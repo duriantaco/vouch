@@ -23,7 +23,7 @@ Good contributions make that pipeline more explicit, deterministic, testable, an
 Run the tests:
 
 ```sh
-GOCACHE=/private/tmp/vouch-gocache go test ./...
+go test ./...
 ```
 
 Install the CLI locally:

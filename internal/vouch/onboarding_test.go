@@ -3,6 +3,7 @@ package vouch
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -159,6 +160,38 @@ func TestManifestCreateAllowsUnownedFilesForCompilerTraceabilityBlock(t *testing
 	}
 }
 
+func TestManifestCreateUsesConfiguredBaseRef(t *testing.T) {
+	repo := initializedRepo(t)
+	createSampleContract(t, repo, RiskMedium)
+	writeText(t, filepath.Join(repo, "src", "app", "service.py"), "def service():\n    return 'old'\n")
+	runGit(t, repo, "init")
+	runGit(t, repo, "checkout", "-b", "trunk")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "-c", "user.email=vouch@example.invalid", "-c", "user.name=Vouch Test", "commit", "-m", "initial")
+	runGit(t, repo, "checkout", "-b", "feature")
+	writeText(t, filepath.Join(repo, "src", "app", "service.py"), "def service():\n    return 'new'\n")
+	runGit(t, repo, "add", "src/app/service.py")
+	runGit(t, repo, "-c", "user.email=vouch@example.invalid", "-c", "user.name=Vouch Test", "commit", "-m", "change service")
+	t.Setenv("VOUCH_BASE_REF", "trunk")
+
+	manifest, err := CreateManifest(repo, ManifestCreateOptions{
+		TaskID:  "agent-1",
+		Summary: "change app service",
+		Agent:   "codex",
+		RunID:   "run-1",
+		Out:     ".vouch/manifests/agent-1.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(manifest.Change.ChangedFiles, "src/app/service.py") {
+		t.Fatalf("expected changed file from trunk...HEAD, got %#v", manifest.Change.ChangedFiles)
+	}
+	if got := strings.Join(manifest.Change.SpecsTouched, ","); got != "app.service" {
+		t.Fatalf("expected app.service from auto-detected base ref, got %s", got)
+	}
+}
+
 func TestAttachArtifactInfersCoveredObligations(t *testing.T) {
 	repo := initializedRepo(t)
 	spec := createSampleContract(t, repo, RiskMedium)
@@ -193,6 +226,9 @@ func TestAttachArtifactInfersCoveredObligations(t *testing.T) {
 	}
 	if !contains(artifact.Obligations, behaviorID) {
 		t.Fatalf("expected inferred obligation %s, got %#v", behaviorID, artifact.Obligations)
+	}
+	if artifact.SHA256 != sha256Hex([]byte(`{"status":"pass","obligations":["`+behaviorID+`"]}`)) {
+		t.Fatalf("expected artifact sha256 to be recorded, got %q", artifact.SHA256)
 	}
 	if len(updated.Verification.Artifacts) != 1 {
 		t.Fatalf("expected one artifact, got %#v", updated.Verification.Artifacts)
@@ -348,6 +384,16 @@ func writeText(t *testing.T, path string, value string) {
 	}
 	if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func runGit(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repo
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Skipf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))
 	}
 }
 
